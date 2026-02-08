@@ -4,7 +4,9 @@ import cors from 'cors'
 import helmet from 'helmet'
 import compression from 'compression'
 import rateLimit from 'express-rate-limit'
+import cookieParser from 'cookie-parser'
 import apiRoutes from './routes/api.js'
+import authRoutes from './routes/auth.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { connectDB, disconnectDB } from './config/database.js'
 
@@ -38,6 +40,9 @@ app.use('/api/', limiter)
 // Body parsing middleware
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// Cookie parser for JWT tokens
+app.use(cookieParser())
 
 // Compression middleware
 app.use(compression())
@@ -77,6 +82,9 @@ const checkDatabaseHealth = async () => {
 
 // API routes
 app.use('/api', apiRoutes)
+
+// Auth routes (must be before 404)
+app.use('/api/auth', authRoutes)
 
 // 404 handler
 app.use((req, res) => {
