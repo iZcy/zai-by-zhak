@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fullstack-app
+  labels:
+    name: fullstack-app
+    environment: base
