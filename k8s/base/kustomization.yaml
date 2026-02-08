@@ -14,11 +14,11 @@ resources:
 
 images:
   - name: fullstack-backend
-    newName: ${BACKEND_REGISTRY}/fullstack-backend
-    newTag: ${BACKEND_VERSION}
+    newName: ghcr.io/your-org/fullstack-backend
+    newTag: ${BACKEND_VERSION:-latest}
   - name: fullstack-frontend
-    newName: ${FRONTEND_REGISTRY}/fullstack-frontend
-    newTag: ${FRONTEND_VERSION}
+    newName: ghcr.io/your-org/fullstack-frontend
+    newTag: ${FRONTEND_VERSION:-latest}
 
 commonLabels:
   app.kubernetes.io/name: fullstack-app

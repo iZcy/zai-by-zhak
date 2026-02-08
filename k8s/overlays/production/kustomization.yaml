@@ -41,8 +41,8 @@ patches:
 
 images:
   - name: fullstack-backend
-    newName: ${ECR_REGISTRY}/fullstack-backend
-    newTag: ${VERSION}
+    newName: ghcr.io/${GITHUB_REPOSITORY_OWNER}/fullstack-backend
+    newTag: ${VERSION:-latest}
   - name: fullstack-frontend
-    newName: ${ECR_REGISTRY}/fullstack-frontend
-    newTag: ${VERSION}
+    newName: ghcr.io/${GITHUB_REPOSITORY_OWNER}/fullstack-frontend
+    newTag: ${VERSION:-latest}

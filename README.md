@@ -1,6 +1,6 @@
-# Fullstack Docker Application
+# Provider-Agnostic Fullstack Application
 
-A production-ready fullstack JavaScript application with Vite + React frontend, Express.js backend, MongoDB database, and Nginx reverse proxy. Fully containerized with Infrastructure as Code using Terraform and Kubernetes.
+A production-ready fullstack JavaScript application with **zero cloud vendor lock-in**. Deploy on any Linux VM, any Kubernetes cluster, or any container registry.
 
 ## 🚀 Tech Stack
 
@@ -9,52 +9,46 @@ A production-ready fullstack JavaScript application with Vite + React frontend, 
 - **Database**: MongoDB
 - **Web Server**: Nginx (reverse proxy & load balancer)
 - **Containerization**: Docker + Docker Compose
-- **Orchestration**: Kubernetes (EKS)
-- **Infrastructure**: Terraform (AWS)
+- **Automation**: Ansible
+- **Orchestration**: Kubernetes (generic, distribution-agnostic)
 - **CI/CD**: GitHub Actions
+- **Container Registry**: GitHub Container Registry (GHCR) - supports any registry
+
+## ✨ Key Features
+
+- **Zero Vendor Lock-in**: Deploy on any VM or K8s cluster
+- **Multi-Registry Support**: GHCR, Docker Hub, GitLab, or self-hosted
+- **Automated Deployment**: Ansible playbooks for VM provisioning
+- **Multiple Deployment Options**: Docker Compose, Ansible, or Kubernetes
+- **Production-Ready**: Includes monitoring, logging, backups, and security hardening
 
 ## 📁 Project Structure
 
 ```
 .
 ├── frontend/              # Vite + React application
-│   ├── src/
-│   │   ├── components/
-│   │   ├── services/
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   └── package.json
 ├── backend/               # Express.js API
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── database.js
-│   │   ├── controllers/
-│   │   ├── middleware/
-│   │   ├── models/
-│   │   ├── routes/
-│   │   └── index.js
-│   ├── Dockerfile
-│   └── package.json
 ├── nginx/                 # Nginx configuration
-│   └── nginx.conf
-├── k8s/                   # Kubernetes manifests
+├── k8s/                   # Generic Kubernetes manifests
 │   ├── base/
 │   └── overlays/
 │       ├── dev/
 │       └── production/
-├── terraform/             # Infrastructure as Code
-│   ├── modules/
-│   │   ├── network/
-│   │   ├── compute/
-│   │   └── database/
-│   └── environments/
-│       ├── dev/
-│       └── production/
-├── .github/workflows/     # CI/CD pipelines
-├── docker-compose.yml
-├── Makefile
+├── ansible/               # VM automation (NEW)
+│   ├── playbooks/
+│   │   ├── setup-vm.yml    # Initial VM provisioning
+│   │   ├── deploy.yml      # Application deployment
+│   │   └── backup.yml      # Backup automation
+│   └── inventory/
+│       └── group_vars/
+├── scripts/               # Utility scripts (NEW)
+│   └── backup.sh          # MongoDB backup script
+├── terraform-aws-archive/ # Deprecated AWS config (archived)
+├── docs/
+│   └── DEPLOYMENT.md      # Comprehensive deployment guide
+├── .github/workflows/     # Updated CI/CD (GHCR, no AWS)
+├── docker-compose.yml     # Enhanced with environment variables
+├── .env.example           # Environment template (NEW)
 └── README.md
 ```
 
@@ -64,86 +58,108 @@ A production-ready fullstack JavaScript application with Vite + React frontend, 
 
 - Node.js 18+ and npm
 - Docker and Docker Compose
-- kubectl (for Kubernetes)
-- Terraform (for IaC)
-- AWS CLI (for cloud deployment)
+- For VM deployment: Ansible
+- For Kubernetes: kubectl
 
 ### Local Development with Docker
 
 ```bash
+# Clone the repository
+git clone https://github.com/your-org/fullstack-app.git
+cd fullstack-app
+
 # Install dependencies
-make install
-
-# Start all services (Frontend + Backend + MongoDB + Nginx)
-make docker-up
-
-# Or using npm
 npm install
-npm start
+
+# Start all services with hot reload
+npm run dev
+
+# Or use Docker Compose
+docker-compose up -d
 ```
 
 Access the application:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:5000
 - Nginx: http://localhost:80
-- MongoDB: mongodb://localhost:27017
 
-### Local Development (Hot Reload)
+## 🚀 Deployment Options
+
+This application supports **three deployment methods**:
+
+### 1. Docker Compose on VM (Recommended)
+
+Simple deployment on any Linux VM.
 
 ```bash
-# Start frontend and backend with hot reload
-make dev
+# On your VM
+git clone https://github.com/your-org/fullstack-app.git
+cd fullstack-app
 
-# Or using npm
-npm run dev
+# Configure environment
+cp .env.example .env
+nano .env  # Edit with your settings
+
+# Start services
+docker-compose up -d
+```
+
+### 2. Ansible + Docker Compose (Automated)
+
+Automated VM provisioning and deployment.
+
+```bash
+# On your control machine
+export VM_IP="192.168.1.100"
+
+# Run initial VM setup (one-time)
+ansible-playbook -i "${VM_IP}," ansible/playbooks/setup-vm.yml
+
+# Deploy application
+ansible-playbook -i "${VM_IP}," ansible/playbooks/deploy.yml
+```
+
+### 3. Kubernetes (Generic)
+
+Deploy to any Kubernetes cluster.
+
+```bash
+# Deploy to development
+kubectl apply -k k8s/overlays/dev/
+
+# Deploy to production
+kubectl apply -k k8s/overlays/production/
+
+# Check status
+kubectl get pods -n fullstack-production
 ```
 
 ## 📦 Available Commands
 
-### Using Make (Recommended)
+### Using Make
 
 ```bash
 make help                    # Show all available commands
 
 # Development
 make dev                     # Start development servers
-make dev-frontend            # Start only frontend
-make dev-backend             # Start only backend
-
-# Docker
-make docker-build            # Build Docker images
 make docker-up               # Start containers
-make docker-down             # Stop containers
-make docker-logs             # View logs
-make docker-clean            # Clean up resources
 
-# Kubernetes
+# Deployment
+make deploy                  # Deploy with Docker Compose
 make k8s-deploy ENV=dev      # Deploy to Kubernetes
-make k8s-logs ENV=dev SERVICE=backend
-make k8s-restart ENV=dev DEPLOYMENT=backend
 
-# Terraform
-make tf-plan ENV=dev         # Plan infrastructure
-make tf-apply ENV=dev        # Apply infrastructure
+# Maintenance
+make backup                  # Create backup
+make logs                    # View logs
 ```
 
 ### Using npm
 
 ```bash
-# Development
 npm run dev                  # Start all services
-npm run dev:frontend         # Frontend only
-npm run dev:backend          # Backend only
-
-# Building
-npm run build                # Build for production
-npm run build:frontend       # Frontend only
-npm run build:backend        # Backend only
-
-# Docker
 npm start                    # Start containers
 npm stop                     # Stop containers
-npm run docker:logs          # View logs
 ```
 
 ## 🌐 API Endpoints
@@ -160,84 +176,47 @@ npm run docker:logs          # View logs
 
 ## 🔧 Environment Variables
 
-### Frontend (.env)
-```bash
-VITE_API_URL=http://localhost:5000/api
-```
+Copy `.env.example` to `.env` and configure:
 
-### Backend (.env)
 ```bash
+# Container Registry
+CONTAINER_REGISTRY=ghcr.io
+IMAGE_OWNER=your-github-username
+IMAGE_TAG=latest
+
+# Application
 NODE_ENV=production
-PORT=5000
-FRONTEND_URL=http://localhost:3000
+FRONTEND_PORT=3000
+BACKEND_PORT=5000
 
 # Database
-MONGODB_URI=mongodb://admin:password@mongodb:27017/fullstack?authSource=admin
-DB_NAME=fullstack
-DB_USERNAME=admin
-DB_PASSWORD=password
-```
-
-## 🚀 Deployment
-
-### Docker Compose (Local/Small Production)
-
-```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-### Kubernetes (On-Premise/Cloud)
-
-```bash
-# Deploy to development
-kubectl apply -k k8s/overlays/dev/
-
-# Deploy to production
-kubectl apply -k k8s/overlays/production/
-
-# Check status
-kubectl get pods -n fullstack-production
-kubectl get svc -n fullstack-production
-```
-
-### Terraform (AWS Cloud)
-
-```bash
-# Initialize
-cd terraform/environments/dev
-terraform init
-
-# Plan changes
-terraform plan -out=tfplan
-
-# Apply infrastructure
-terraform apply tfplan
-
-# Get outputs
-terraform output
+MONGODB_ROOT_USERNAME=admin
+MONGODB_ROOT_PASSWORD=changeme
+MONGODB_DATABASE=fullstack
 ```
 
 ## 🔄 CI/CD Pipeline
 
-The GitHub Actions workflow automates:
+The GitHub Actions workflow:
 
 1. **Lint & Test** - Runs on every push
-2. **Build Images** - Builds and pushes to ECR
-3. **Security Scan** - Scans images with Trivy
-4. **Deploy Dev** - Auto-deploys develop branch
-5. **Deploy Staging** - Auto-deploys main branch
+2. **Build Images** - Pushes to **GitHub Container Registry (GHCR)**
+3. **Security Scan** - Trivy vulnerability scanning
+4. **Deploy Dev** - Auto-deploys develop branch via Ansible
+5. **Deploy Staging** - Auto-deploys main branch via Ansible
 6. **Deploy Production** - Manual approval required
+7. **Backup** - Automatic backup on production deployment
 
-See `.github/workflows/ci-cd.yml` for details.
+### Required GitHub Secrets
 
-## 📊 DevOps Cycle
+- `SSH_PRIVATE_KEY` - SSH key for VM access
+- `DEV_VM_HOST` / `DEV_VM_USER` - Development VM details
+- `STAGING_VM_HOST` / `STAGING_VM_USER` - Staging VM details
+- `PROD_VM_HOST` / `PROD_VM_USER` - Production VM details
+
+**No registry secrets needed for GHCR** - uses `GITHUB_TOKEN` automatically!
+
+## 🔄 DevOps Cycle
 
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
@@ -258,50 +237,103 @@ See `.github/workflows/ci-cd.yml` for details.
 - **CORS**: Cross-origin resource sharing
 - **Rate Limiting**: DDoS protection
 - **Input Validation**: Mongoose schemas
-- **Secret Management**: Kubernetes secrets
-- **Network Policies**: VPC isolation
+- **Fail2Ban**: Brute force protection (Ansible)
+- **UFW Firewall**: Network isolation (Ansible)
 - **Image Scanning**: Trivy security scans
+
+## 💾 Backups
+
+### Manual Backup
+
+```bash
+# Run backup script
+./scripts/backup.sh
+
+# Or via Docker Compose
+docker-compose --profile backup run --rm backup
+```
+
+### Automated Backup
+
+```bash
+# Via Ansible
+ansible-playbook -i inventory ansible/playbooks/backup.yml
+
+# Via cron
+0 2 * * * cd /opt/fullstack-app && ./scripts/backup.sh
+```
 
 ## 📈 Monitoring & Logging
 
-- **Health Checks**: `/health` endpoints
-- **Logs**: JSON file logging with rotation
-- **Metrics**: CloudWatch integration
-- **Alerts**: Configurable thresholds
+- **Health Checks**: `/health` endpoints on all services
+- **Structured Logging**: JSON format with rotation
+- **Log Aggregation**: Centralized in `/var/log/fullstack-app`
+- **Resource Monitoring**: Container stats available via `docker stats`
+
+## 🎯 Container Registries
+
+This application supports **any** container registry:
+
+### GitHub Container Registry (Default)
+
+```bash
+CONTAINER_REGISTRY=ghcr.io
+IMAGE_OWNER=your-github-username
+```
+
+### Docker Hub
+
+```bash
+CONTAINER_REGISTRY=docker.io
+IMAGE_OWNER=your-dockerhub-username
+```
+
+### Self-Hosted
+
+```bash
+CONTAINER_REGISTRY=registry.example.com
+IMAGE_OWNER=your-project
+```
 
 ## 🛠️ Troubleshooting
 
 ### Common Issues
 
-**MongoDB Connection Error:**
+**Container won't start:**
 ```bash
-# Check MongoDB is running
-docker ps | grep mongo
-
-# Check connection string
-echo $MONGODB_URI
+docker-compose logs backend
+docker-compose ps
 ```
 
-**Pods Not Starting:**
+**Database connection errors:**
 ```bash
-# Describe pod
-kubectl describe pod <pod-name> -n fullstack-production
-
-# View logs
-kubectl logs <pod-name> -n fullstack-production
+docker-compose exec mongodb mongosh --eval "db.adminCommand('ping')"
 ```
 
-**High Memory Usage:**
+**Permission issues:**
 ```bash
-# Check resource usage
-kubectl top pods -n fullstack-production
+sudo chown -R $USER:$USER /opt/fullstack-app
 ```
 
 ## 📚 Documentation
 
-- [DevOps Pipeline](./docs/DEVOPS_PIPELINE.md) - Complete CI/CD documentation
-- [Terraform](./terraform/README.md) - Infrastructure documentation
-- [Kubernetes](./k8s/README.md) - K8s deployment guide
+- [Deployment Guide](./docs/DEPLOYMENT.md) - Comprehensive deployment documentation
+- [Ansible Playbooks](./ansible/README.md) - VM automation guide
+- [Kubernetes Manifests](./k8s/README.md) - K8s deployment
+
+## 🔄 Migration from AWS
+
+If you're migrating from the previous AWS-specific setup:
+
+1. AWS Terraform is archived in `terraform-aws-archive/`
+2. CI/CD now uses GHCR instead of ECR
+3. Deployment uses Ansible instead of EKS
+4. No AWS SDK or credentials required
+
+To deploy on AWS EC2 with the new setup:
+1. Launch an Ubuntu EC2 instance
+2. Use the Ansible playbooks to deploy
+3. No EKS, VPC, or NAT Gateway configuration needed
 
 ## 🤝 Contributing
 
@@ -323,5 +355,6 @@ MIT
 
 - Vite team
 - Express.js community
+- Ansible project
 - Kubernetes documentation
-- Terraform providers
+- GitHub Actions team

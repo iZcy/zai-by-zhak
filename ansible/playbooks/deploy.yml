@@ -1,0 +1,206 @@
+---
+# Provider-Agnostic Deployment Playbook
+# Deploys the fullstack application using Docker Compose on any VM
+
+- name: Deploy Fullstack Application
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # Can be overridden via extra-vars
+    target_environment: "{{ lookup('env', 'TARGET_ENVIRONMENT') | default('production', true) }}"
+    registry: "{{ lookup('env', 'REGISTRY') | default(container_registry, true) }}"
+    image_tag_override: "{{ lookup('env', 'IMAGE_TAG') | default(image_tag, true) }}"
+
+    # Environment file location
+    env_file: /opt/{{ app_name }}/.env
+
+  pre_tasks:
+    - name: Display deployment information
+      debug:
+        msg:
+          - "Deploying to: {{ target_environment }}"
+          - "Registry: {{ registry }}"
+          - "Image tag: {{ image_tag_override }}"
+          - "Compose directory: {{ docker_compose_dir }}"
+
+  tasks:
+    - name: Ensure Docker is running
+      systemd:
+        name: docker
+        state: started
+      register: docker_status
+
+    - name: Pull latest images from registry
+      docker_image:
+        name: "{{ item }}:{{ image_tag_override }}"
+        source: pull
+        state: present
+      loop:
+        - "{{ backend_image }}"
+        - "{{ frontend_image }}"
+      register: pull_result
+      until: pull_result is succeeded
+      retries: 3
+      delay: 5
+
+    - name: Create application directory
+      file:
+        path: "{{ docker_compose_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Generate .env file
+      copy:
+        dest: "{{ env_file }}"
+        content: |
+          # Application configuration
+          NODE_ENV=production
+          APP_NAME={{ app_name }}
+          APP_DOMAIN={{ app_domain }}
+
+          # Container registry
+          CONTAINER_REGISTRY={{ registry }}
+          IMAGE_TAG={{ image_tag_override }}
+
+          # Backend configuration
+          BACKEND_IMAGE={{ backend_image }}
+          BACKEND_PORT={{ backend_port }}
+          FRONTEND_URL={{ frontend_url | default('http://localhost:' + frontend_port | string) }}
+
+          # Frontend configuration
+          FRONTEND_IMAGE={{ frontend_image }}
+          FRONTEND_PORT={{ frontend_port }}
+          VITE_API_URL={{ api_url | default('http://localhost:' + backend_port | string + '/api') }}
+
+          # MongoDB configuration
+          MONGODB_ROOT_USERNAME={{ mongodb_root_username }}
+          MONGODB_ROOT_PASSWORD={{ mongodb_root_password }}
+          MONGODB_DATABASE={{ mongodb_database }}
+          MONGODB_PORT={{ mongodb_port }}
+
+          # Nginx configuration
+          NGINX_HTTP_PORT={{ nginx_http_port }}
+          NGINX_HTTPS_PORT={{ nginx_https_port }}
+          SSL_ENABLED={{ ssl_enabled | default(false) }}
+
+          # Logging
+          LOG_DIR={{ log_dir }}
+
+          # Backup
+          BACKUP_ENABLED={{ backup_enabled | default(true) }}
+          BACKUP_DIR={{ backup_dir }}
+        mode: '0600'
+        owner: "{{ ansible_user }}"
+
+    - name: Copy docker-compose.yml to remote
+      copy:
+        src: "{{ playbook_dir }}/../docker-compose.yml"
+        dest: "{{ docker_compose_dir }}/docker-compose.yml"
+        mode: '0644'
+        owner: "{{ ansible_user }}"
+
+    - name: Create nginx configuration directory
+      file:
+        path: "{{ docker_compose_dir }}/nginx"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy nginx configuration
+      copy:
+        src: "{{ playbook_dir }}/../nginx/nginx.conf"
+        dest: "{{ docker_compose_dir }}/nginx/nginx.conf"
+        mode: '0644'
+        owner: "{{ ansible_user }}"
+
+    - name: Create SSL directory if SSL is enabled
+      file:
+        path: "{{ docker_compose_dir }}/nginx/ssl"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0700'
+      when: ssl_enabled | default(false)
+
+    - name: Check for existing containers
+      shell: docker-compose ps -q
+      args:
+        chdir: "{{ docker_compose_dir }}"
+      register: existing_containers
+      failed_when: false
+      changed_when: false
+
+    - name: Stop existing containers
+      shell: docker-compose down
+      args:
+        chdir: "{{ docker_compose_dir }}"
+      when: existing_containers.stdout_lines | length > 0
+
+    - name: Start services with Docker Compose
+      shell: docker-compose up -d
+      args:
+        chdir: "{{ docker_compose_dir }}"
+      environment:
+        COMPOSE_HTTP_TIMEOUT: 300
+      register: compose_up_result
+
+    - name: Wait for services to be healthy
+      uri:
+        url: "http://localhost:{{ item }}/health"
+        method: GET
+        status_code: 200
+        timeout: 5
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 5
+      loop:
+        - "{{ frontend_port }}"
+        - "{{ backend_port }}"
+      ignore_errors: yes
+
+    - name: Check running containers
+      shell: docker-compose ps
+      args:
+        chdir: "{{ docker_compose_dir }}"
+      register: container_status
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        var: container_status.stdout_lines
+
+    - name: Verify deployment
+      assert:
+        that:
+          - "'fullstack-frontend' in container_status.stdout"
+          - "'fullstack-backend' in container_status.stdout"
+          - "'fullstack-mongodb' in container_status.stdout"
+        fail_msg: "Deployment verification failed - containers not running"
+        success_msg: "Deployment verified successfully"
+
+    - name: Cleanup old images
+      shell: docker image prune -af --filter "until=24h"
+      register: image_cleanup
+      changed_when: "'Total reclaimed space' in image_cleanup.stdout"
+
+    - name: Display cleanup results
+      debug:
+        msg: "{{ image_cleanup.stdout_lines }}"
+      when: image_cleanup.changed
+
+  post_tasks:
+    - name: Deployment summary
+      debug:
+        msg:
+          - "=========================================="
+          - "Deployment completed successfully!"
+          - "Environment: {{ target_environment }}"
+          - "Frontend URL: http://{{ ansible_default_ipv4.address }}:{{ frontend_port }}"
+          - "Backend API: http://{{ ansible_default_ipv4.address }}:{{ backend_port }}"
+          - "=========================================="

@@ -1,0 +1,33 @@
+---
+# Production environment variables
+
+# Override default values for production
+image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('main', true) }}"
+
+# Production replicas and scaling
+backend_replicas: 3
+frontend_replicas: 3
+
+# Resource limits
+backend_memory_limit: 1g
+backend_memory_reservation: 512m
+frontend_memory_limit: 512m
+frontend_memory_reservation: 256m
+mongodb_memory_limit: 2g
+
+# Production-specific domains
+app_domain: app.example.com
+api_url: https://app.example.com/api
+
+# Monitoring
+monitoring_enabled: true
+alert_email: ops@example.com
+
+# Backup (more frequent for production)
+backup_enabled: true
+backup_schedule: "0 2 * * *"  # Daily at 2 AM
+backup_retention_days: 30
+
+# SSL (usually enabled in production)
+ssl_enabled: true
+ssl_cert_source: letsencrypt  # or selfsigned or custom

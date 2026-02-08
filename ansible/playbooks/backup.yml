@@ -1,0 +1,238 @@
+---
+# Provider-Agnostic Backup Playbook
+# Creates automated backups of MongoDB and application data
+
+- name: Backup Application Data
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # Backup configuration
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+    backup_name: "{{ app_name }}-backup-{{ backup_timestamp }}"
+    backup_temp_dir: "/tmp/{{ backup_name }}"
+
+    # Remote backup options (can be overridden)
+    remote_backup_enabled: false
+    remote_backup_host: ""
+    remote_backup_user: "backup"
+    remote_backup_path: "/backups/{{ app_name }}"
+
+  pre_tasks:
+    - name: Display backup information
+      debug:
+        msg:
+          - "Creating backup: {{ backup_name }}"
+          - "Local backup dir: {{ backup_dir }}"
+          - "Remote backup: {{ remote_backup_enabled }}"
+
+  tasks:
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Create temporary backup directory
+      file:
+        path: "{{ backup_temp_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Get MongoDB container info
+      shell: docker ps --filter "name=fullstack-mongodb" --format "{{ '{{ .ID }}' }}"
+      register: mongodb_container
+      changed_when: false
+      failed_when: mongodb_container.stdout == ""
+
+    - name: Create MongoDB dump
+      shell: |
+        docker exec {{ mongodb_container.stdout }} mongodump \
+          --username={{ mongodb_root_username }} \
+          --password={{ mongodb_root_password }} \
+          --authenticationDatabase=admin \
+          --db={{ mongodb_database }} \
+          --archive=/tmp/mongodb-archive.gz \
+          --gzip
+      register: mongodb_dump
+      no_log: true  # Hide password from logs
+
+    - name: Copy MongoDB dump from container
+      shell: docker cp {{ mongodb_container.stdout }}:/tmp/mongodb-archive.gz {{ backup_temp_dir }}/mongodb-backup.gz
+
+    - name: Create application configuration backup
+      archive:
+        path:
+          - "{{ docker_compose_dir }}/.env"
+          - "{{ docker_compose_dir }}/docker-compose.yml"
+          - "{{ docker_compose_dir }}/nginx"
+        dest: "{{ backup_temp_dir }}/config-backup.tar.gz"
+        mode: '0600'
+
+    - name: Create logs backup
+      archive:
+        path:
+          - "{{ log_dir }}"
+        dest: "{{ backup_temp_dir }}/logs-backup.tar.gz"
+        mode: '0600'
+      when:
+        - log_dir is defined
+        - log_dir | length > 0
+
+    - name: Create final backup archive
+      shell: |
+        cd {{ backup_temp_dir }}
+        tar -czf {{ backup_dir }}/{{ backup_name }}.tar.gz .
+      args:
+        warn: false
+
+    - name: Get backup file size
+      stat:
+        path: "{{ backup_dir }}/{{ backup_name }}.tar.gz"
+      register: backup_file
+
+    - name: Display backup information
+      debug:
+        msg:
+          - "Backup created: {{ backup_dir }}/{{ backup_name }}.tar.gz"
+          - "Size: {{ (backup_file.stat.size / 1024 / 1024) | round(2) }} MB"
+
+    # Cleanup old backups
+    - name: Find old backups to remove
+      find:
+        paths: "{{ backup_dir }}"
+        patterns: "*.tar.gz"
+        age: "{{ backup_retention_days }}d"
+      register: old_backups
+
+    - name: Remove old backups
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when:
+        - backup_retention_days is defined
+        - backup_retention_days > 0
+
+    - name: Display cleanup information
+      debug:
+        msg: "Removed {{ old_backups.matched | default(0) }} old backup(s)"
+      when: old_backups.matched | default(0) > 0
+
+    # Remote backup (optional)
+    - name: Copy backup to remote server
+      shell: |
+        scp {{ backup_dir }}/{{ backup_name }}.tar.gz \
+          {{ remote_backup_user }}@{{ remote_backup_host }}:{{ remote_backup_path }}/
+      when:
+        - remote_backup_enabled | default(false)
+        - remote_backup_host | length > 0
+      register: remote_backup_result
+      failed_when: false
+
+    - name: Display remote backup status
+      debug:
+        msg: "Backup copied to {{ remote_backup_host }}"
+      when:
+        - remote_backup_enabled | default(false)
+        - remote_backup_result is succeeded
+
+    - name: Cleanup temporary directory
+      file:
+        path: "{{ backup_temp_dir }}"
+        state: absent
+
+    - name: Create backup manifest
+      copy:
+        dest: "{{ backup_dir }}/manifest-{{ backup_timestamp }}.json"
+        content: |
+          {
+            "backup_name": "{{ backup_name }}",
+            "timestamp": {{ backup_timestamp }},
+            "date": "{{ ansible_date_time.iso8601 }}",
+            "hostname": "{{ ansible_hostname }}",
+            "environment": "{{ target_environment | default('unknown') }}",
+            "size_bytes": {{ backup_file.stat.size }},
+            "mongodb_dump": true,
+            "config_backup": true,
+            "remote_backup": {{ remote_backup_enabled | default(false) | lower }}
+          }
+        mode: '0644'
+
+  post_tasks:
+    - name: Backup summary
+      debug:
+        msg:
+          - "=========================================="
+          - "Backup completed successfully!"
+          - "File: {{ backup_dir }}/{{ backup_name }}.tar.gz"
+          - "Size: {{ (backup_file.stat.size / 1024 / 1024) | round(2) }} MB"
+          - "Retention: {{ backup_retention_days }} days"
+          - "=========================================="
+
+# Optional rollback capability
+- name: Restore from Backup
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    backup_file_to_restore: ""  # Specify via extra-vars
+    restore_mongodb: true
+    restore_config: true
+
+  tasks:
+    - name: Validate backup file
+      stat:
+        path: "{{ backup_file_to_restore }}"
+      register: backup_stat
+      failed_when: not backup_stat.stat.exists
+
+    - name: Extract backup archive
+      unarchive:
+        src: "{{ backup_file_to_restore }}"
+        dest: /tmp/restore
+        remote_src: yes
+
+    - name: Stop application services
+      shell: docker-compose stop
+      args:
+        chdir: "{{ docker_compose_dir }}"
+
+    - name: Restore MongoDB
+      shell: |
+        docker cp /tmp/restore/mongodb-backup.gz \
+          fullstack-mongodb:/tmp/restore.gz
+        docker exec fullstack-mongodb mongorestore \
+          --username={{ mongodb_root_username }} \
+          --password={{ mongodb_root_password }} \
+          --authenticationDatabase=admin \
+          --db={{ mongodb_database }} \
+          --archive=/tmp/restore.gz \
+          --gzip
+      when: restore_mongodb
+      no_log: true
+
+    - name: Restore configuration
+      shell: |
+        tar -xzf /tmp/restore/config-backup.tar.gz -C {{ docker_compose_dir }}
+      when: restore_config
+
+    - name: Start application services
+      shell: docker-compose up -d
+      args:
+        chdir: "{{ docker_compose_dir }}"
+
+    - name: Cleanup restore directory
+      file:
+        path: /tmp/restore
+        state: absent
+
+    - name: Restore completed
+      debug:
+        msg: "Restore from {{ backup_file_to_restore }} completed successfully"

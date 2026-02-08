@@ -31,8 +31,8 @@ patches:
 
 images:
   - name: fullstack-backend
-    newName: fullstack-backend
-    newTag: dev
+    newName: ghcr.io/${GITHUB_REPOSITORY_OWNER}/fullstack-backend
+    newTag: develop
   - name: fullstack-frontend
-    newName: fullstack-frontend
-    newTag: dev
+    newName: ghcr.io/${GITHUB_REPOSITORY_OWNER}/fullstack-frontend
+    newTag: develop

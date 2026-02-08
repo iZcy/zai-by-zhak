@@ -1,22 +1,30 @@
 version: '3.8'
 
+# Provider-Agnostic Docker Compose Configuration
+# Supports both local builds and pre-built images from any container registry
+#
+# Usage:
+#   Local development: docker-compose up -d
+#   Production with GHCR: CONTAINER_REGISTRY=ghcr.io IMAGE_OWNER=your-org docker-compose up -d
+
 services:
   # Frontend - Nginx serving React build
   frontend:
+    image: ${CONTAINER_REGISTRY}/${IMAGE_OWNER}/fullstack-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: fullstack-frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
     networks:
       - app-network
     depends_on:
       - backend
     environment:
-      - NODE_ENV=production
-      - VITE_API_URL=http://localhost:3000/api
+      - NODE_ENV=${NODE_ENV:-production}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:5000/api}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
@@ -26,31 +34,32 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
 
   # Backend - Express.js API
   backend:
+    image: ${CONTAINER_REGISTRY}/${IMAGE_OWNER}/fullstack-backend:${IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: fullstack-backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${BACKEND_PORT:-5000}:5000"
     networks:
       - app-network
     depends_on:
       mongodb:
         condition: service_healthy
     environment:
-      - NODE_ENV=production
-      - PORT=5000
-      - FRONTEND_URL=http://localhost:3000
-      - MONGODB_URI=mongodb://admin:password@mongodb:27017/fullstack?authSource=admin
-      - DB_NAME=fullstack
-      - DB_USERNAME=admin
-      - DB_PASSWORD=password
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${BACKEND_PORT:-5000}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - MONGODB_URI=mongodb://${MONGODB_ROOT_USERNAME:-admin}:${MONGODB_ROOT_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-fullstack}?authSource=admin
+      - DB_NAME=${MONGODB_DATABASE:-fullstack}
+      - DB_USERNAME=${MONGODB_ROOT_USERNAME:-admin}
+      - DB_PASSWORD=${MONGODB_ROOT_PASSWORD:-password}
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
@@ -60,25 +69,26 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
 
   # MongoDB - Database
   mongodb:
-    image: mongo:7.0
+    image: mongo:${MONGODB_VERSION:-7.0}
     container_name: fullstack-mongodb
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "${MONGODB_PORT:-27017}:27017"
     networks:
       - app-network
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=password
-      - MONGO_INITDB_DATABASE=fullstack
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-fullstack}
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
+      - ${BACKUP_DIR:-./backups}:/backup
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -88,17 +98,39 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
+
+  # Backup Service - Automated MongoDB backups
+  backup:
+    image: mongo:${MONGODB_VERSION:-7.0}
+    container_name: fullstack-backup
+    restart: "no"
+    networks:
+      - app-network
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-fullstack}
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-0 2 * * *}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backup
+      - ./scripts/backup.sh:/backup/backup.sh:ro
+    command: /bin/sh -c "chmod +x /backup/backup.sh && /backup/backup.sh"
+    profiles:
+      - backup
 
   # Nginx - Reverse Proxy and Load Balancer
   nginx:
-    image: nginx:alpine
+    image: nginx:${NGINX_VERSION:-alpine}
     container_name: fullstack-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     networks:
       - app-network
     depends_on:
@@ -107,6 +139,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
@@ -115,8 +148,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
 
 networks:
   app-network:
@@ -126,4 +159,6 @@ volumes:
   mongodb_data:
     driver: local
   mongodb_config:
+    driver: local
+  nginx_logs:
     driver: local

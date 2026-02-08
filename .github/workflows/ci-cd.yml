@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-  EKS_CLUSTER_NAME: fullstack-app-${{ github.ref_name }}
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: fullstack-backend
+  IMAGE_NAME_FRONTEND: fullstack-frontend
 
 jobs:
   # Job 1: Lint and Test
@@ -50,47 +50,46 @@ jobs:
     if: github.event_name == 'push'
 
     permissions:
-      id-token: write
       contents: read
+      packages: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata for Frontend
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.ECR_REGISTRY }}/fullstack-frontend
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME_FRONTEND }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Extract metadata for Backend
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.ECR_REGISTRY }}/fullstack-backend
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME_BACKEND }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
@@ -115,7 +114,7 @@ jobs:
       - name: Image scan with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REGISTRY }}/fullstack-backend:latest
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME_BACKEND }}:latest
           format: 'sarif'
           output: 'trivy-results.sarif'
 
@@ -124,7 +123,7 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-  # Job 3: Deploy to Development
+  # Job 3: Deploy to Development (Docker Compose)
   deploy-dev:
     name: Deploy to Development
     runs-on: ubuntu-latest
@@ -132,34 +131,32 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     environment:
       name: development
-      url: https://dev.example.com
+      url: http://dev.example.com
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to VM via Ansible
+        uses: dawidd6/action-ansible-playbook@v2
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
-
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply -k k8s/overlays/dev/
-          kubectl rollout status deployment/backend -n fullstack-dev
-          kubectl rollout status deployment/frontend -n fullstack-dev
+          playbook: ansible/playbooks/deploy.yml
+          directory: ./
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          inventory: |
+            [development]
+            ${{ secrets.DEV_VM_HOST }} ansible_user=${{ secrets.DEV_VM_USER }}
+          options: |
+            --extra-vars "target_environment=development"
+            --extra-vars "image_tag=${{ github.ref_name }}"
+            --extra-vars "registry=${{ env.REGISTRY }}"
 
       - name: Verify deployment
         run: |
-          kubectl get pods -n fullstack-dev
-          kubectl describe deployment backend -n fullstack-dev
+          curl -f http://${{ secrets.DEV_VM_HOST }}:3000/health || exit 1
+          curl -f http://${{ secrets.DEV_VM_HOST }}:5000/health || exit 1
 
-  # Job 4: Deploy to Staging
+  # Job 4: Deploy to Staging (Docker Compose)
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
@@ -167,27 +164,30 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: staging
-      url: https://staging.example.com
+      url: http://staging.example.com
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to VM via Ansible
+        uses: dawidd6/action-ansible-playbook@v2
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          playbook: ansible/playbooks/deploy.yml
+          directory: ./
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          inventory: |
+            [staging]
+            ${{ secrets.STAGING_VM_HOST }} ansible_user=${{ secrets.STAGING_VM_USER }}
+          options: |
+            --extra-vars "target_environment=staging"
+            --extra-vars "image_tag=${{ github.ref_name }}"
+            --extra-vars "registry=${{ env.REGISTRY }}"
 
-      - name: Update kubeconfig
+      - name: Verify deployment
         run: |
-          aws eks update-kubeconfig --name fullstack-app-staging --region ${{ env.AWS_REGION }}
-
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply -k k8s/overlays/staging/
-          kubectl rollout status deployment/backend -n fullstack-staging
-          kubectl rollout status deployment/frontend -n fullstack-staging
+          curl -f http://${{ secrets.STAGING_VM_HOST }}:3000/health || exit 1
+          curl -f http://${{ secrets.STAGING_VM_HOST }}:5000/health || exit 1
 
   # Job 5: Integration Tests
   integration-test:
@@ -210,7 +210,7 @@ jobs:
       - name: Run integration tests
         run: npm run test:integration
         env:
-          API_URL: https://staging.example.com/api
+          API_URL: http://${{ secrets.STAGING_VM_HOST }}:5000/api
 
   # Job 6: Deploy to Production (Manual Approval)
   deploy-production:
@@ -226,34 +226,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --name fullstack-app-production --region ${{ env.AWS_REGION }}
-
       - name: Create deployment tag
         run: echo "DEPLOYMENT_TAG=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
 
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply -k k8s/overlays/production/
-          kubectl rollout status deployment/backend -n fullstack-production
-          kubectl rollout status deployment/frontend -n fullstack-production
+      - name: Deploy to VM via Ansible
+        uses: dawidd6/action-ansible-playbook@v2
+        with:
+          playbook: ansible/playbooks/deploy.yml
+          directory: ./
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          inventory: |
+            [production]
+            ${{ secrets.PROD_VM_HOST }} ansible_user=${{ secrets.PROD_VM_USER }}
+          options: |
+            --extra-vars "target_environment=production"
+            --extra-vars "image_tag=${{ github.ref_name }}"
+            --extra-vars "registry=${{ env.REGISTRY }}"
 
       - name: Verify deployment
         run: |
-          kubectl get pods -n fullstack-production
-          kubectl describe deployment backend -n fullstack-production
+          curl -f http://${{ secrets.PROD_VM_HOST }}:3000/health || exit 1
+          curl -f http://${{ secrets.PROD_VM_HOST }}:5000/health || exit 1
 
-      - name: Run smoke tests
-        run: |
-          curl -f https://app.example.com/health || exit 1
-          curl -f https://app.example.com/api/health || exit 1
+      - name: Create backup
+        uses: dawidd6/action-ansible-playbook@v2
+        with:
+          playbook: ansible/playbooks/backup.yml
+          directory: ./
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          inventory: |
+            [production]
+            ${{ secrets.PROD_VM_HOST }} ansible_user=${{ secrets.PROD_VM_USER }}
 
       - name: Notify Slack
         if: success()

@@ -1,0 +1,253 @@
+---
+# Provider-Agnostic VM Setup Playbook
+# This playbook prepares any Linux VM (Ubuntu, Debian, CentOS) for application deployment
+
+- name: Setup and harden VM for deployment
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # System packages to install
+    system_packages:
+      - curl
+      - wget
+      - git
+      - vim
+      - htop
+      - net-tools
+      - unzip
+      - ufw  # Ubuntu/Debian
+      - fail2ban
+
+    # Docker dependencies
+    docker_dependencies:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+
+  pre_tasks:
+    - name: Display distribution info
+      debug:
+        msg: "Setting up {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Update package cache (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (RedHat/CentOS)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+  tasks:
+    - name: Create deployment user
+      user:
+        name: "{{ ansible_user }}"
+        shell: /bin/bash
+        groups: sudo,docker
+        append: yes
+        state: present
+
+    - name: Configure sudo for deployment user
+      lineinfile:
+        path: /etc/sudoers.d/{{ ansible_user }}
+        line: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL"
+        create: yes
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Setup SSH key for deployment user
+      authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+        manage_dir: yes
+      ignore_errors: yes
+
+    # Security hardening
+    - name: Install security packages
+      package:
+        name: "{{ system_packages }}"
+        state: present
+
+    - name: Configure UFW (Ubuntu/Debian)
+      block:
+        - name: Allow SSH
+          ufw:
+            rule: allow
+            port: "{{ ssh_port }}"
+            proto: tcp
+
+        - name: Allow HTTP/HTTPS
+          ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop:
+            - "{{ nginx_http_port }}"
+            - "{{ nginx_https_port }}"
+
+        - name: Allow application ports
+          ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop:
+            - "{{ frontend_port }}"
+            - "{{ backend_port }}"
+
+        - name: Enable UFW
+          ufw:
+            state: enabled
+            policy: deny
+      when:
+        - firewall_enabled | default(true)
+        - ansible_os_family == "Debian"
+
+    - name: Configure Fail2Ban
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 5
+          destemail = {{ alert_email | default('root@localhost') }}
+          action = %(action_mwl)s
+
+          [sshd]
+          enabled = true
+          port = {{ ssh_port }}
+          logpath = /var/log/auth.log
+          maxretry = 3
+      notify: restart fail2ban
+      when: fail2ban_enabled | default(true)
+
+    # Docker installation (Debian/Ubuntu)
+    - name: Add Docker GPG key (Debian/Ubuntu)
+      apt_key:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository (Debian/Ubuntu)
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker (Debian/Ubuntu)
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "Debian"
+
+    # Docker installation (RedHat/CentOS)
+    - name: Add Docker repository (RedHat/CentOS)
+      yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable
+        baseurl: https://download.docker.com/linux/{{ ansible_distribution | lower }}/{{ ansible_distribution_major_version }}/$basearch/stable
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Docker (RedHat/CentOS)
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add deployment user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # Application directories
+    - name: Create application directory
+      file:
+        path: "{{ docker_compose_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Create log directory
+      file:
+        path: "{{ log_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    # System tuning
+    - name: Configure sysctl for better performance
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: "net.ipv4.ip_forward", value: "1" }
+        - { name: "net.core.somaxconn", value: "1024" }
+        - { name: "vm.swappiness", value: "10" }
+
+    - name: Configure system limits for containers
+      copy:
+        dest: /etc/security/limits.d/99-containers.conf
+        content: |
+          * soft nofile 65536
+          * hard nofile 65536
+          * soft nproc 4096
+          * hard nproc 4096
+
+    # NTP time synchronization
+    - name: Ensure timezone is set to UTC
+      timezone:
+        name: UTC
+
+    - name: Install and configure timesync (RedHat)
+      yum:
+        name: chrony
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Start timesync service
+      systemd:
+        name: "{{ 'chronyd' if ansible_os_family == 'RedHat' else 'systemd-timesyncd' }}"
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted

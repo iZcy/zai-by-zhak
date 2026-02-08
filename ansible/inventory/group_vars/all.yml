@@ -1,0 +1,49 @@
+---
+# Common variables for all environments
+
+# Application configuration
+app_name: fullstack-app
+app_domain: example.com
+
+# Container registry (can be overridden per environment)
+container_registry: ghcr.io
+image_owner: "{{ lookup('env', 'GITHUB_REPOSITORY_OWNER') | default('your-org', true) }}"
+backend_image: "{{ container_registry }}/{{ image_owner }}/fullstack-backend"
+frontend_image: "{{ container_registry }}/{{ image_owner }}/fullstack-frontend"
+image_tag: latest
+
+# Docker configuration
+docker_compose_version: "2.24.0"
+docker_compose_dir: /opt/{{ app_name }}
+docker_network_name: app-network
+
+# Application ports
+frontend_port: 3000
+backend_port: 5000
+mongodb_port: 27017
+nginx_http_port: 80
+nginx_https_port: 443
+
+# MongoDB configuration
+mongodb_root_username: admin
+mongodb_root_password: "{{ vault_mongodb_root_password | default('changeme') }}"
+mongodb_database: fullstack
+mongodb_data_dir: /var/lib/mongodb/data
+
+# Backup configuration
+backup_enabled: true
+backup_dir: /opt/backups
+backup_retention_days: 7
+
+# SSL/TLS
+ssl_enabled: false
+ssl_cert_path: /etc/ssl/certs
+ssl_key_path: /etc/ssl/private
+
+# Security
+ssh_port: 22
+firewall_enabled: true
+fail2ban_enabled: true
+
+# Logging
+log_dir: /var/log/{{ app_name }}

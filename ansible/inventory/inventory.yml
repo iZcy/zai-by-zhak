@@ -1,0 +1,31 @@
+---
+# Provider-Agnostic Inventory File
+# Usage: Update the hosts below with your VM details
+#
+# Example:
+# [production]
+# prod-server ansible_host=192.168.1.100 ansible_user=deploy
+#
+# [staging]
+# staging-server ansible_host=192.168.1.101 ansible_user=deploy
+#
+# [development]
+# dev-server ansible_host=192.168.1.102 ansible_user=deploy
+
+all:
+  children:
+    production:
+      hosts:
+        # prod-server:
+        #   ansible_host: YOUR_PROD_VM_IP
+        #   ansible_user: deploy
+    staging:
+      hosts:
+        # staging-server:
+        #   ansible_host: YOUR_STAGING_VM_IP
+        #   ansible_user: deploy
+    development:
+      hosts:
+        # dev-server:
+        #   ansible_host: YOUR_DEV_VM_IP
+        #   ansible_user: deploy

@@ -78,7 +78,7 @@ spec:
       name: mongodb-data
     spec:
       accessModes: ["ReadWriteOnce"]
-      storageClassName: gp2
+      # storageClassName: standard (uses cluster default when omitted)
       resources:
         requests:
           storage: 10Gi
@@ -86,7 +86,7 @@ spec:
       name: mongodb-config
     spec:
       accessModes: ["ReadWriteOnce"]
-      storageClassName: gp2
+      # storageClassName: standard (uses cluster default when omitted)
       resources:
         requests:
           storage: 1Gi
