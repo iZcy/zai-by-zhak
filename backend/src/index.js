@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit'
 import cookieParser from 'cookie-parser'
 import apiRoutes from './routes/api.js'
 import authRoutes from './routes/auth.js'
+import subscriptionRoutes from './routes/subscription.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { connectDB, disconnectDB } from './config/database.js'
 
@@ -86,6 +87,12 @@ app.use('/api', apiRoutes)
 // Auth routes (must be before 404)
 app.use('/api/auth', authRoutes)
 
+// Subscription routes
+app.use('/api', subscriptionRoutes)
+
+// Serve static uploads
+app.use('/uploads', express.static('uploads'));
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -103,6 +110,44 @@ const startServer = async () => {
     // Connect to MongoDB if URI is provided
     if (MONGODB_URI) {
       await connectDB();
+
+      // Create dummy accounts for development
+      const User = (await import('./models/User.js')).default;
+
+      // Check and create dummy admin
+      const dummyAdmin = await User.findOne({ email: 'admin@zai.dev' });
+      if (!dummyAdmin) {
+        await User.create({
+          email: 'admin@zai.dev',
+          displayName: 'Dev Admin',
+          role: 'admin',
+          referralCode: 'ADMIN-DEV',
+          emailVerified: true,
+          lastLogin: new Date()
+        });
+        console.log('✅ Created dummy admin account: admin@zai.dev');
+      }
+
+      // Check and create 10 dummy users
+      const dummyUsersCount = await User.countDocuments({ email: { $regex: '^user[0-9]+@zai\\.dev$' } });
+      if (dummyUsersCount < 10) {
+        const generateReferralCode = (num) => `USER${String(num).padStart(3, '0')}-DEV`;
+        for (let i = 1; i <= 10; i++) {
+          const email = `user${i}@zai.dev`;
+          const existing = await User.findOne({ email });
+          if (!existing) {
+            await User.create({
+              email,
+              displayName: `Dev User ${i}`,
+              role: 'user',
+              referralCode: generateReferralCode(i),
+              emailVerified: true,
+              lastLogin: new Date()
+            });
+            console.log(`✅ Created dummy user account: ${email}`);
+          }
+        }
+      }
     } else {
       console.warn('⚠️  No MONGODB_URI provided, running without database');
     }

@@ -6,6 +6,97 @@ import { GOOGLE_CONFIG } from '../auth/google.js';
 
 const router = express.Router();
 
+// ============================================
+// DEVELOPMENT ENDPOINTS - Remove in production
+// ============================================
+
+// Get all dev users for testing
+router.get('/dev/users', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+
+  try {
+    const devEmails = ['admin@zai.dev'];
+    for (let i = 1; i <= 10; i++) {
+      devEmails.push(`user${i}@zai.dev`);
+    }
+
+    const users = await User.find({
+      email: { $in: devEmails }
+    }).select('email displayName role referralCode');
+
+    res.json({
+      success: true,
+      users
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Dev login - switch between test users
+router.post('/dev/login', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user);
+
+    // Set cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        referralCode: user.referralCode
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// ============================================
+// END DEVELOPMENT ENDPOINTS
+// ============================================
+
 // Get Google OAuth URL
 router.get('/google/url', (req, res) => {
   const baseURL = process.env.FRONTEND_URL || req.headers.origin || 'https://zai.izcy.tech';
@@ -34,11 +125,21 @@ router.get('/google/callback', async (req, res) => {
     }
 
     // Exchange code for access token
+    // Get the actual callback URL from the request
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const callbackUrl = `${protocol}://${host}/api/auth/google/callback`;
+
+    console.log('🔍 OAuth Callback Debug:');
+    console.log('protocol:', protocol);
+    console.log('host:', host);
+    console.log('callbackUrl:', callbackUrl);
+
     const tokenResponse = await axios.post(GOOGLE_CONFIG.tokenURL, {
       code,
       client_id: GOOGLE_CONFIG.clientId,
       client_secret: GOOGLE_CONFIG.clientSecret,
-      redirect_uri: `${process.env.FRONTEND_URL || 'https://zai.izcy.tech'}/api/auth/google/callback`,
+      redirect_uri: callbackUrl,
       grant_type: 'authorization_code'
     });
 

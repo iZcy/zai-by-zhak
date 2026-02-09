@@ -21,10 +21,14 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.22.1",
+    "multer": "^2.0.2",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }

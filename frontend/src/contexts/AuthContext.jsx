@@ -37,20 +37,66 @@ export const AuthProvider = ({ children }) => {
   const checkAuth = async () => {
     try {
       const response = await api.get('/auth/me');
-      setUser(response.data.user || null);
+
+      if (response.data.user) {
+        setUser(response.data.user);
+      } else {
+        // For development, auto-login as first dev user
+        if (import.meta.env.DEV) {
+          await devLogin('admin@zai.dev');
+        } else {
+          setUser(null);
+        }
+      }
     } catch (error) {
-      setUser(null);
+      // For development, auto-login as first dev user
+      if (import.meta.env.DEV) {
+        await devLogin('admin@zai.dev');
+      } else {
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const devLogin = async (email) => {
+    try {
+      const response = await api.post('/auth/dev/login', { email });
+
+      if (response.data.success && response.data.user) {
+        // Store token
+        if (response.data.token) {
+          localStorage.setItem('token', response.data.token);
+        }
+        setUser(response.data.user);
+      }
+    } catch (error) {
+      console.error('Dev login failed:', error);
+      setUser(null);
+    }
+  };
+
+  const switchTestUser = async (email) => {
+    setLoading(true);
+    await devLogin(email);
+    setLoading(false);
+  };
+
   const loginWithGoogle = () => {
     // Direct redirect to Google OAuth
     const clientId = '951242789573-tajkvlmef0t3fiovvj232t772gbgjo8r.apps.googleusercontent.com';
-    const redirectUri = `${window.location.origin}/api/auth/google/callback`;
+    // Use API base URL for redirect (backend handles the callback)
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const redirectUri = `${apiBase}/auth/google/callback`;
     const scope = 'profile email';
     const responseType = 'code';
+
+    // Debug: Log the redirect URI
+    console.log('🔍 Google OAuth Debug:');
+    console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
+    console.log('apiBase:', apiBase);
+    console.log('redirectUri:', redirectUri);
 
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(clientId)}&` +
@@ -58,6 +104,7 @@ export const AuthProvider = ({ children }) => {
       `response_type=${encodeURIComponent(responseType)}&` +
       `scope=${encodeURIComponent(scope)}`;
 
+    console.log('Full auth URL:', authUrl);
     window.location.href = authUrl;
   };
 
@@ -84,6 +131,7 @@ export const AuthProvider = ({ children }) => {
     loginWithGoogle,
     logout,
     isAdmin,
+    switchTestUser,
     isAuthenticated: !!user
   };
 

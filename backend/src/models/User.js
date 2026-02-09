@@ -37,6 +37,20 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  referralCodeUsed: {
+    type: String,
+    default: null
+  },
   lastLogin: {
     type: Date
   },
