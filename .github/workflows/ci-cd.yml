@@ -220,7 +220,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://app.example.com
+      url: https://zai.izcy.tech
 
     steps:
       - name: Checkout code
@@ -229,34 +229,56 @@ jobs:
       - name: Create deployment tag
         run: echo "DEPLOYMENT_TAG=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
 
-      - name: Deploy to VM via Ansible
-        uses: dawidd6/action-ansible-playbook@v2
-        with:
-          playbook: ansible/playbooks/deploy.yml
-          directory: ./
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          inventory: |
-            [production]
-            ${{ secrets.PROD_VM_HOST }} ansible_user=${{ secrets.PROD_VM_USER }}
-          options: |
-            --extra-vars "target_environment=production"
-            --extra-vars "image_tag=${{ github.ref_name }}"
-            --extra-vars "registry=${{ env.REGISTRY }}"
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.PROD_VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy deployment files to server
+        run: |
+          scp docker-compose.yml .env.production ${{ secrets.PROD_VM_USER }}@${{ secrets.PROD_VM_HOST }}:/opt/glm-collective/
+
+      - name: Pull and restart services
+        run: |
+          ssh ${{ secrets.PROD_VM_USER }}@${{ secrets.PROD_VM_HOST }} << 'ENDSSH'
+            set -e
+            cd /opt/glm-collective
+
+            # Pull latest images from registry
+            docker-compose pull
+
+            # Restart services
+            docker-compose up -d frontend backend mongodb
+
+            # Wait for services to be healthy
+            sleep 10
+
+            # Check status
+            docker-compose ps
+          ENDSSH
 
       - name: Verify deployment
         run: |
-          curl -f http://${{ secrets.PROD_VM_HOST }}:3000/health || exit 1
-          curl -f http://${{ secrets.PROD_VM_HOST }}:5000/health || exit 1
+          curl -f https://zai.izcy.tech/ || exit 1
+          curl -f https://zai.izcy.tech/api/health || exit 1
 
-      - name: Create backup
-        uses: dawidd6/action-ansible-playbook@v2
-        with:
-          playbook: ansible/playbooks/backup.yml
-          directory: ./
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          inventory: |
-            [production]
-            ${{ secrets.PROD_VM_HOST }} ansible_user=${{ secrets.PROD_VM_USER }}
+      - name: Create MongoDB backup
+        run: |
+          ssh ${{ secrets.PROD_VM_USER }}@${{ secrets.PROD_VM_HOST }} << 'ENDSSH'
+            set -e
+            BACKUP_DIR="/opt/glm-collective/backups"
+            mkdir -p "$BACKUP_DIR"
+
+            docker exec fullstack-mongodb mongodump \
+              --username=admin \
+              --password="${{ secrets.MONGODB_ROOT_PASSWORD }}" \
+              --authenticationDatabase=admin \
+              --db=fullstack \
+              --archive="$BACKUP_DIR/mongodb-${{ env.DEPLOYMENT_TAG }}.gz" \
+              --gzip
+          ENDSSH
 
       - name: Notify Slack
         if: success()
