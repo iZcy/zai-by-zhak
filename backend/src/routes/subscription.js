@@ -231,7 +231,7 @@ router.get('/referral/active', authenticate, async (req, res) => {
 });
 
 // Create subscription request (buy stock)
-router.post('/subscription/request', authenticate, upload.single('paymentProof'), async (req, res) => {
+router.post('/request', authenticate, upload.single('paymentProof'), async (req, res) => {
   try {
     const userId = req.user._id;
 
@@ -283,7 +283,8 @@ router.post('/subscription/request', authenticate, upload.single('paymentProof')
       subscription: {
         id: subscription._id,
         stockId: subscription.stockId,
-        status: subscription.status
+        status: subscription.status,
+        paymentProof: subscription.paymentProof
       }
     });
   } catch (error) {
@@ -295,7 +296,7 @@ router.post('/subscription/request', authenticate, upload.single('paymentProof')
 });
 
 // Get user's subscriptions
-router.get('/subscription/my', authenticate, async (req, res) => {
+router.get('/my', authenticate, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ userId: req.user._id })
       .sort({ createdAt: -1 });

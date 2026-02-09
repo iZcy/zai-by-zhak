@@ -9,6 +9,8 @@ export default function AdminSubscriptionPanel() {
   const [selectedSubscription, setSelectedSubscription] = useState(null);
   const [apiToken, setApiToken] = useState('');
   const [loading, setLoading] = useState(true);
+  const [imageLoadErrors, setImageLoadErrors] = useState({});
+  const [imageDataUrls, setImageDataUrls] = useState({});
 
   useEffect(() => {
     // Skip auth check in dev mode
@@ -22,12 +24,54 @@ export default function AdminSubscriptionPanel() {
         api.get('/subscription/admin/subscriptions/active').catch(() => ({ data: { subscriptions: [] } }))
       ]);
 
-      setPendingSubscriptions(pendingRes.data.subscriptions || []);
-      setActiveSubscriptions(activeRes.data.subscriptions || []);
+      const pending = pendingRes.data.subscriptions || [];
+      const active = activeRes.data.subscriptions || [];
+
+      setPendingSubscriptions(pending);
+      setActiveSubscriptions(active);
+
+      // Pre-fetch payment proof images with authentication
+      await fetchPaymentProofImages([...pending, ...active]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPaymentProofImages = async (subscriptions) => {
+    const token = localStorage.getItem('token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+    for (const sub of subscriptions) {
+      if (sub.paymentProof) {
+        try {
+          // Payment proofs are served at /api/subscription/uploads/payment-proofs/:filename
+          const imagePath = sub.paymentProof.startsWith('/uploads/')
+            ? `/subscription${sub.paymentProof}`
+            : sub.paymentProof;
+
+          const response = await fetch(`${apiUrl}${imagePath}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const blob = await response.blob();
+            const reader = new FileReader();
+            const dataUrl = await new Promise((resolve, reject) => {
+              reader.onloadend = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            setImageDataUrls(prev => ({ ...prev, [sub._id || sub.id]: dataUrl }));
+          } else {
+            setImageLoadErrors(prev => ({ ...prev, [sub._id || sub.id]: true }));
+          }
+        } catch (err) {
+          console.error('Failed to load image:', err);
+          setImageLoadErrors(prev => ({ ...prev, [sub._id || sub.id]: true }));
+        }
+      }
     }
   };
 
@@ -51,19 +95,16 @@ export default function AdminSubscriptionPanel() {
     }
   };
 
-  const handleReject = async () => {
-    if (!selectedSubscription) return;
-
+  const handleReject = async (subscription) => {
     const reason = prompt('Enter rejection reason:');
     if (!reason) return;
 
     try {
-      await api.post(`/subscription/admin/subscriptions/${selectedSubscription._id}/reject`, {
+      await api.post(`/subscription/admin/subscriptions/${subscription._id || subscription.id}/reject`, {
         reason
       });
 
       alert('Subscription rejected');
-      setSelectedSubscription(null);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to reject subscription');
@@ -111,14 +152,26 @@ export default function AdminSubscriptionPanel() {
 
                     {sub.paymentProof && (
                       <div className="mt-3">
-                        <a
-                          href={sub.paymentProof}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-emerald-400 hover:underline"
-                        >
-                          View Payment Proof
-                        </a>
+                        {imageLoadErrors[sub._id || sub.id] ? (
+                          <div className="w-full h-32 rounded border border-red-900 bg-red-950/50 flex items-center justify-center">
+                            <p className="text-xs text-red-400">Failed to load image</p>
+                          </div>
+                        ) : imageDataUrls[sub._id || sub.id] ? (
+                          <>
+                            <img
+                              src={imageDataUrls[sub._id || sub.id]}
+                              alt="Payment Proof"
+                              className="max-w-full h-auto rounded border border-stone-700 bg-black"
+                              onClick={() => window.open(imageDataUrls[sub._id || sub.id], '_blank')}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            <p className="text-xs text-stone-500 mt-1">Click to view full size</p>
+                          </>
+                        ) : (
+                          <div className="w-full h-32 rounded border border-stone-800 bg-stone-900/50 flex items-center justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-emerald-400"></div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -131,7 +184,7 @@ export default function AdminSubscriptionPanel() {
                       Approve
                     </button>
                     <button
-                      onClick={handleReject}
+                      onClick={() => handleReject(sub)}
                       className="h-9 px-3 rounded-lg text-xs font-medium border border-red-900 text-red-400 hover:bg-red-950"
                     >
                       Reject

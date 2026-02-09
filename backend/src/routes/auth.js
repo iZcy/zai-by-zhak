@@ -82,7 +82,8 @@ router.post('/dev/login', async (req, res) => {
         email: user.email,
         displayName: user.displayName,
         role: user.role,
-        referralCode: user.referralCode
+        referralCode: user.referralCode,
+        referralCodeUsed: user.referralCodeUsed
       }
     });
   } catch (error) {
@@ -215,6 +216,8 @@ router.get('/me', optionalAuth, async (req, res) => {
         displayName: req.user.displayName,
         picture: req.user.picture,
         role: req.user.role,
+        referralCode: req.user.referralCode,
+        referralCodeUsed: req.user.referralCodeUsed,
         emailVerified: req.user.emailVerified,
         createdAt: req.user.createdAt,
         lastLogin: req.user.lastLogin

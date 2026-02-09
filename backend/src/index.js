@@ -30,13 +30,15 @@ app.use(cors({
   credentials: true
 }))
 
-// Rate limiting
+// Rate limiting (disabled for development)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: process.env.NODE_ENV === 'production' ? 100 : 10000, // Higher limit for development
   message: 'Too many requests from this IP, please try again later.'
 })
-app.use('/api/', limiter)
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/', limiter)
+}
 
 // Body parsing middleware
 app.use(express.json())
@@ -82,13 +84,14 @@ const checkDatabaseHealth = async () => {
 };
 
 // API routes
+app.use('/api/subscription', subscriptionRoutes)
 app.use('/api', apiRoutes)
 
 // Auth routes (must be before 404)
 app.use('/api/auth', authRoutes)
 
-// Subscription routes
-app.use('/api', subscriptionRoutes)
+// Debug: Log registered routes
+console.log('Subscription routes stack:', subscriptionRoutes.stack.map(layer => ({ path: layer.path, method: Object.keys(layer.methods || {}).join(',') || layer.route?.methods ? Object.keys(layer.route.methods).join(',') : 'middleware' })))
 
 // Serve static uploads
 app.use('/uploads', express.static('uploads'));

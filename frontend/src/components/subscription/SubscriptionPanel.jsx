@@ -10,32 +10,59 @@ export default function SubscriptionPanel() {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [paymentProof, setPaymentProof] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [referredByCode, setReferredByCode] = useState(null);
   const { user } = useAuth();
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
+
+  // Update referredByCode when user changes
+  useEffect(() => {
+    console.log('User changed in SubscriptionPanel:', {
+      email: user?.email,
+      referralCodeUsed: user?.referralCodeUsed
+    });
+    if (user?.referralCodeUsed) {
+      setReferredByCode(user.referralCodeUsed);
+    } else {
+      setReferredByCode(null);
+    }
+  }, [user]);
 
   const fetchData = async () => {
+    console.log('fetchData called, user:', user?.email);
     try {
       const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes] = await Promise.all([
-        api.get('/subscription/dashboard').catch(() => ({ data: { dashboard: null } })),
-        api.get('/subscription/referral/code').catch(() => ({ data: { referralCode: 'DEV-REF-CODE' } })),
-        api.get('/subscription/my').catch(() => ({ data: { subscriptions: [] } })),
-        api.get('/subscription/referral/active').catch(() => ({ data: { activeReferrals: [] } }))
+        api.get('/subscription/dashboard'),
+        api.get('/subscription/referral/code'),
+        api.get('/subscription/my'),
+        api.get('/subscription/referral/active')
       ]);
 
+      console.log('API responses received:', {
+        dashboard: dashboardRes.data,
+        referralCode: referralRes.data.referralCode,
+        subscriptions: subscriptionsRes.data.subscriptions?.length
+      });
+
       setDashboard(dashboardRes.data.dashboard || { stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0 });
-      setReferralCode(referralRes.data.referralCode || 'DEV-REF-CODE');
+      setReferralCode(referralRes.data.referralCode);
       setSubscriptions(subscriptionsRes.data.subscriptions || []);
       setActiveReferrals(activeReferralsRes.data.activeReferrals || []);
+
+      // Get the user's referral code used from the current user object (not from initial mount)
+      // The user object in AuthContext should have referralCodeUsed from the backend
     } catch (error) {
-      console.error('Error fetching data:', error);
-      // Set default values for dev mode
+      console.error('Error fetching subscription data:', error);
+      // Don't set fallback values - let the UI show empty state
       setDashboard({ stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0 });
-      setReferralCode('DEV-REF-CODE');
+      setReferralCode('');
       setSubscriptions([]);
       setActiveReferrals([]);
+      setReferredByCode(null);
     } finally {
       setLoading(false);
     }
@@ -187,14 +214,20 @@ export default function SubscriptionPanel() {
           <div className="flex items-center justify-between p-4 rounded-lg border border-stone-800 bg-black">
             <div>
               <p className="text-xs text-stone-500">Your Referral Code</p>
-              <p className="text-lg font-mono font-semibold text-emerald-400 mt-1">{referralCode}</p>
+              {referralCode ? (
+                <p className="text-lg font-mono font-semibold text-emerald-400 mt-1">{referralCode}</p>
+              ) : (
+                <p className="text-sm text-stone-600 mt-1">Loading...</p>
+              )}
             </div>
-            <button
-              onClick={handleCopyReferralCode}
-              className="h-9 px-4 rounded-md text-xs font-medium bg-stone-100 text-black hover:bg-emerald-100"
-            >
-              Copy
-            </button>
+            {referralCode && (
+              <button
+                onClick={handleCopyReferralCode}
+                className="h-9 px-4 rounded-md text-xs font-medium bg-stone-100 text-black hover:bg-emerald-100"
+              >
+                Copy
+              </button>
+            )}
           </div>
 
           <div className="p-4 rounded-lg border border-stone-800 bg-black">
@@ -215,7 +248,24 @@ export default function SubscriptionPanel() {
             </ul>
           </div>
 
-          <InsertReferralCode onSuccess={fetchData} />
+          {/* Submitted Referral Code - show if user has used a referral code */}
+          {referredByCode && (
+            <div className="p-4 rounded-lg border border-emerald-900 bg-emerald-950/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-stone-500">Submitted Referred Code</p>
+                  <p className="text-lg font-mono font-semibold text-emerald-400 mt-1">{referredByCode}</p>
+                  <p className="text-xs text-stone-600 mt-1">This code cannot be changed</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <iconify-icon icon="solar:lock-closed-linear" width="16" className="text-emerald-500"></iconify-icon>
+                  <span className="text-xs text-emerald-500">Locked</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <InsertReferralCode onSuccess={fetchData} disabled={!!referredByCode} />
         </div>
       </div>
 
@@ -294,7 +344,7 @@ export default function SubscriptionPanel() {
   );
 }
 
-function InsertReferralCode({ onSuccess }) {
+function InsertReferralCode({ onSuccess, disabled }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -313,6 +363,23 @@ function InsertReferralCode({ onSuccess }) {
       setLoading(false);
     }
   };
+
+  if (disabled) {
+    return (
+      <div className="p-4 rounded-lg border border-stone-800 bg-stone-900 opacity-50">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-stone-500">Referral Code</p>
+            <p className="text-sm text-stone-400 mt-1">You have already used a referral code</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <iconify-icon icon="solar:lock-closed-linear" width="16" className="text-stone-600"></iconify-icon>
+            <span className="text-xs text-stone-600">Locked</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="flex gap-2">

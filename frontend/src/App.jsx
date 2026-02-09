@@ -8,7 +8,6 @@ import './App.css'
 import api from './services/api'
 
 function AppContent() {
-  const [showAdmin, setShowAdmin] = useState(false)
   const [devUsers, setDevUsers] = useState([])
   const { isAdmin, user, switchTestUser } = useAuth()
 
@@ -46,14 +45,6 @@ function AppContent() {
                   ))}
                 </select>
               )}
-              {isAdmin() && (
-                <button
-                  onClick={() => setShowAdmin(!showAdmin)}
-                  className="text-sm text-stone-400 hover:text-emerald-100 transition-colors"
-                >
-                  {showAdmin ? 'Dashboard' : 'Admin Panel'}
-                </button>
-              )}
               <LoginButton />
             </div>
           </div>
@@ -63,12 +54,8 @@ function AppContent() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-6 md:p-8 lg:p-12">
         <div className="max-w-5xl mx-auto space-y-8 fade-in">
-          {showAdmin ? (
-            isAdmin() ? (
-              <AdminSubscriptionPanel />
-            ) : (
-              <AdminPanel />
-            )
+          {isAdmin() ? (
+            <AdminSubscriptionPanel />
           ) : (
             <SubscriptionPanel />
           )}

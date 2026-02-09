@@ -62,7 +62,9 @@ export const AuthProvider = ({ children }) => {
 
   const devLogin = async (email) => {
     try {
+      console.log('Attempting dev login for email:', email);
       const response = await api.post('/auth/dev/login', { email });
+      console.log('Dev login response:', response.data);
 
       if (response.data.success && response.data.user) {
         // Store token
@@ -70,6 +72,7 @@ export const AuthProvider = ({ children }) => {
           localStorage.setItem('token', response.data.token);
         }
         setUser(response.data.user);
+        console.log('User set successfully:', response.data.user);
       }
     } catch (error) {
       console.error('Dev login failed:', error);
@@ -78,6 +81,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const switchTestUser = async (email) => {
+    console.log('switchTestUser called with email:', email);
     setLoading(true);
     await devLogin(email);
     setLoading(false);
