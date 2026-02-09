@@ -12,6 +12,11 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
+    // Add token from localStorage if available
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -23,6 +28,14 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Handle 401 errors - clear token and redirect to login
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/') {
+        window.location.href = '/'
+      }
+    }
     const message = error.response?.data?.message || error.message || 'An error occurred'
     return Promise.reject(new Error(message))
   }

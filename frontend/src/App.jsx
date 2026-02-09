@@ -238,7 +238,7 @@ function AppContent() {
 
         {/* Footer */}
         <div className="mt-12 mb-6 flex items-center justify-center">
-          <span className="text-[10px] uppercase tracking-widest text-stone-700">Built with Vite, Express, Docker & Google OAuth</span>
+          <span className="text-[10px] uppercase tracking-widest text-stone-700">Built with GLM 4.7 prompted by iZcy</span>
         </div>
       </main>
     </div>

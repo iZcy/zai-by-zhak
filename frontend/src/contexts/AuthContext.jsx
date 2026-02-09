@@ -16,6 +16,21 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check for token in URL (from OAuth callback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const authToken = urlParams.get('token');
+    const authStatus = urlParams.get('auth');
+
+    if (authStatus === 'success' && authToken) {
+      // Store token in localStorage
+      localStorage.setItem('token', authToken);
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+      // Check auth will use the new token
+      checkAuth();
+      return;
+    }
+
     checkAuth();
   }, []);
 
@@ -50,8 +65,12 @@ export const AuthProvider = ({ children }) => {
     try {
       await api.post('/auth/logout');
       setUser(null);
+      localStorage.removeItem('token');
     } catch (error) {
       console.error('Logout failed:', error);
+      // Still clear local state on error
+      setUser(null);
+      localStorage.removeItem('token');
     }
   };
 
