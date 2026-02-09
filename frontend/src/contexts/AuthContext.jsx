@@ -31,8 +31,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   const loginWithGoogle = () => {
-    // Get Google OAuth URL from backend
-    window.location.href = `${import.meta.env.VITE_API_URL}/auth/google/url?redirect=${encodeURIComponent(window.location.pathname)}`;
+    // Direct redirect to Google OAuth
+    const clientId = '951242789573-tajkvlmef0t3fiovvj232t772gbgjo8r.apps.googleusercontent.com';
+    const redirectUri = `${window.location.origin}/api/auth/google/callback`;
+    const scope = 'profile email';
+    const responseType = 'code';
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${encodeURIComponent(clientId)}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `response_type=${encodeURIComponent(responseType)}&` +
+      `scope=${encodeURIComponent(scope)}`;
+
+    window.location.href = authUrl;
   };
 
   const logout = async () => {
