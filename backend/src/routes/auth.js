@@ -1,24 +1,22 @@
 import express from 'express';
-import passport from '../auth/google.js';
+import axios from 'axios';
 import { generateToken, authenticate, requireAdmin, optionalAuth } from '../auth/jwt.js';
 import User from '../models/User.js';
+import { GOOGLE_CONFIG } from '../auth/google.js';
 
 const router = express.Router();
 
 // Get Google OAuth URL
 router.get('/google/url', (req, res) => {
   const baseURL = process.env.FRONTEND_URL || req.headers.origin || 'https://zai.izcy.tech';
-  const state = JSON.stringify({
-    redirect: req.query.redirect || '/',
-    timestamp: Date.now()
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CONFIG.clientId,
+    redirect_uri: `${baseURL}/api/auth/google/callback`,
+    response_type: 'code',
+    scope: 'profile email'
   });
 
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${encodeURIComponent(process.env.GOOGLE_CLIENT_ID)}&` +
-    `redirect_uri=${encodeURIComponent(process.env.GOOGLE_CALLBACK_URL || `${baseURL}/api/auth/google/callback`)}&` +
-    `response_type=code&` +
-    `scope=${encodeURIComponent('profile email')}&` +
-    `state=${encodeURIComponent(state)}`;
+  const authUrl = `${GOOGLE_CONFIG.authURL}?${params.toString()}`;
 
   res.json({
     success: true,
@@ -27,28 +25,81 @@ router.get('/google/url', (req, res) => {
 });
 
 // Google OAuth callback
-router.get('/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: '/login?error=oauth_failed' }),
-  async (req, res) => {
-    try {
-      const { user, token, created } = req.authInfo;
+router.get('/google/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
 
-      // Set HTTP-only cookie with token
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      // Redirect to frontend
-      const frontendURL = process.env.FRONTEND_URL || 'https://zai.izcy.tech';
-      res.redirect(`${frontendURL}/auth/callback?token=${token}&created=${created}`);
-    } catch (error) {
-      res.redirect(`${process.env.FRONTEND_URL || 'https://zai.izcy.tech'}/login?error=callback_failed`);
+    if (!code) {
+      return res.redirect(`${process.env.FRONTEND_URL || 'https://zai.izcy.tech'}?error=no_code`);
     }
+
+    // Exchange code for access token
+    const tokenResponse = await axios.post(GOOGLE_CONFIG.tokenURL, {
+      code,
+      client_id: GOOGLE_CONFIG.clientId,
+      client_secret: GOOGLE_CONFIG.clientSecret,
+      redirect_uri: `${process.env.FRONTEND_URL || 'https://zai.izcy.tech'}/api/auth/google/callback`,
+      grant_type: 'authorization_code'
+    });
+
+    const { access_token } = tokenResponse.data;
+
+    // Get user info from Google
+    const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const googleUser = userResponse.data;
+
+    // Find or create user in database
+    let user = await User.findOne({ googleId: googleUser.id });
+
+    const isAdminUser = process.env.ADMIN_EMAILS?.split(',').includes(googleUser.email) ||
+                        googleUser.email === 'yitzhaketmanalu@gmail.com';
+
+    if (user) {
+      // Update existing user
+      user.displayName = googleUser.name;
+      user.firstName = googleUser.given_name;
+      user.lastName = googleUser.family_name;
+      user.picture = googleUser.picture;
+      user.emailVerified = googleUser.verified_email;
+      user.lastLogin = new Date();
+      await user.save();
+    } else {
+      // Create new user
+      user = await User.create({
+        googleId: googleUser.id,
+        email: googleUser.email,
+        displayName: googleUser.name,
+        firstName: googleUser.given_name,
+        lastName: googleUser.family_name,
+        picture: googleUser.picture,
+        emailVerified: googleUser.verified_email,
+        role: isAdminUser ? 'admin' : 'user',
+        lastLogin: new Date()
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user);
+
+    // Set HTTP-only cookie with token
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    // Redirect to frontend with success
+    const frontendURL = process.env.FRONTEND_URL || 'https://zai.izcy.tech';
+    res.redirect(`${frontendURL}/?auth=success&token=${token}`);
+  } catch (error) {
+    console.error('Google OAuth callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL || 'https://zai.izcy.tech'}?error=oauth_failed`);
   }
-);
+});
 
 // Get current user
 router.get('/me', optionalAuth, async (req, res) => {
@@ -161,7 +212,7 @@ router.get('/profile', authenticate, async (req, res) => {
         emailVerified: req.user.emailVerified,
         createdAt: req.user.createdAt,
         lastLogin: req.user.lastLogin,
-        isAdmin: req.user.isAdmin()
+        isAdmin: req.user.role === 'admin'
       }
     });
   } catch (error) {

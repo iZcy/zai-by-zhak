@@ -10,7 +10,7 @@ version: '3.8'
 services:
   # Frontend - Nginx serving React build
   frontend:
-    image: ${CONTAINER_REGISTRY}/${IMAGE_OWNER}/fullstack-frontend:${IMAGE_TAG:-latest}
+    image: ${CONTAINER_REGISTRY:+${CONTAINER_REGISTRY}/}${IMAGE_OWNER:+${IMAGE_OWNER}/}fullstack-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -39,7 +39,7 @@ services:
 
   # Backend - Express.js API
   backend:
-    image: ${CONTAINER_REGISTRY}/${IMAGE_OWNER}/fullstack-backend:${IMAGE_TAG:-latest}
+    image: ${CONTAINER_REGISTRY:+${CONTAINER_REGISTRY}/}${IMAGE_OWNER:+${IMAGE_OWNER}/}fullstack-backend:${IMAGE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile

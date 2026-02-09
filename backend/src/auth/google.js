@@ -1,39 +1,24 @@
-import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import User from '../models/User.js';
-import { generateToken } from './jwt.js';
+// Google OAuth configuration
+// This file exports Google OAuth configuration constants
 
-// Configure Google OAuth strategy
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
+export const GOOGLE_CONFIG = {
+  clientId: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    const { user, created } = await User.findOrCreateFromGoogle(profile);
+  callbackURL: process.env.GOOGLE_CALLBACK_URL || 'https://zai.izcy.tech/api/auth/google/callback',
+  scopes: ['profile', 'email'],
+  authURL: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenURL: 'https://oauth2.googleapis.com/token'
+};
 
-    // Generate JWT token
-    const token = generateToken(user);
+export const getGoogleAuthURL = (redirectURI) => {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CONFIG.clientId,
+    redirect_uri: redirectURI || GOOGLE_CONFIG.callbackURL,
+    response_type: 'code',
+    scope: GOOGLE_CONFIG.scopes.join(' ')
+  });
 
-    return done(null, { user, token, created });
-  } catch (error) {
-    return done(error, null);
-  }
-}));
+  return `${GOOGLE_CONFIG.authURL}?${params.toString()}`;
+};
 
-// Serialize user for session
-passport.serializeUser((user, done) => {
-  done(null, user._id);
-});
-
-// Deserialize user from session
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id);
-    done(null, user);
-  } catch (error) {
-    done(error, null);
-  }
-}));
-
-export default passport;
+export default { GOOGLE_CONFIG, getGoogleAuthURL };
