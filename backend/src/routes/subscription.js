@@ -708,8 +708,28 @@ router.get('/dashboard', authenticate, async (req, res) => {
       }
     }
 
-    const monthlyFee = activeReferrals.length * 2.5;
+    const monthlyProfit = activeReferrals.length * 2.5;
+
+    // Count all stocks (for display)
     const stockCount = await Subscription.countDocuments({ userId });
+
+    // Count only active paying stocks (for net cost calculation)
+    // A stock is "paying" if: status='active', isActive=true, and not expired
+    const payingStocks = await Subscription.find({
+      userId,
+      status: 'active',
+      isActive: true
+    });
+
+    let activePayingStocksCount = 0;
+    for (const sub of payingStocks) {
+      if (sub.isActivelyPaying()) {
+        activePayingStocksCount++;
+      }
+    }
+
+    // Net cost: only count paying stocks
+    const netCost = (activePayingStocksCount * 10) - monthlyProfit;
 
     res.json({
       success: true,
@@ -717,10 +737,11 @@ router.get('/dashboard', authenticate, async (req, res) => {
         hasActiveSubscription: !!subscription && subscription.isActivelyPaying(),
         activeUntil: subscription?.activeUntil || null,
         stockCount: stockCount,
+        activeStocksCount: activePayingStocksCount,
         totalReferrals: referrals.length,
         activeReferrals: activeReferrals.length,
-        monthlyProfit: monthlyFee,
-        netCost: (stockCount * 10) - monthlyFee
+        monthlyProfit: monthlyProfit,
+        netCost: netCost
       }
     });
   } catch (error) {
