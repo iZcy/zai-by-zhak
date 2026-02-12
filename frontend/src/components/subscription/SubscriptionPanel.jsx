@@ -159,9 +159,14 @@ export default function SubscriptionPanel() {
           <h2 className="text-sm font-medium text-stone-100">My Stocks</h2>
           <button
             onClick={() => setShowBuyModal(true)}
-            className="h-9 px-4 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+            disabled={dashboard?.hasActiveSubscription}
+            className={`h-9 px-4 rounded-md text-xs font-medium ${
+              dashboard?.hasActiveSubscription
+                ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+            }`}
           >
-            Buy Stock
+            {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : 'Buy Stock'}
           </button>
         </div>
 
@@ -175,7 +180,7 @@ export default function SubscriptionPanel() {
           <div className="space-y-3">
             {subscriptions.map((sub) => (
               <div key={sub.id} className="p-4 rounded-lg border border-stone-800 bg-black">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium text-stone-200">{sub.stockId}</p>
                     <div className="flex items-center gap-2 mt-1">
@@ -200,6 +205,27 @@ export default function SubscriptionPanel() {
                     <p className="text-xs text-stone-600">per month</p>
                   </div>
                 </div>
+                {sub.apiToken && (
+                  <div className="mt-3 p-3 rounded-lg bg-stone-900/50 border border-stone-800">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-stone-500 mb-1">API Token</p>
+                        <code className="text-xs font-mono text-emerald-400 break-all">
+                          {sub.apiToken}
+                        </code>
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(sub.apiToken);
+                          alert('API token copied!');
+                        }}
+                        className="ml-3 h-8 px-3 rounded text-xs font-medium bg-stone-800 text-stone-300 hover:bg-stone-700"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
