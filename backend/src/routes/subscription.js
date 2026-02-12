@@ -310,6 +310,7 @@ router.get('/my', authenticate, async (req, res) => {
         isActive: sub.isActive,
         activeUntil: sub.activeUntil,
         monthlyFee: sub.monthlyFee,
+        apiToken: sub.apiToken,
         hasApiToken: !!sub.apiToken,
         paymentProof: sub.paymentProof
       }))
@@ -361,9 +362,96 @@ router.get('/admin/subscriptions/active', authenticate, requireAdmin, async (req
         user: sub.userId,
         stockId: sub.stockId,
         apiToken: sub.apiToken,
+        activeSince: sub.lastActivatedAt,
         activeUntil: sub.activeUntil,
+        isActive: sub.isActive,
         isActivelyPaying: sub.isActivelyPaying()
       }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Get all subscriptions (including disabled/cancelled)
+router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const subscriptions = await Subscription.find({
+      status: { $in: ['active', 'cancelled'] }
+    })
+      .populate('userId', 'email displayName')
+      .sort({ updatedAt: -1 });
+
+    // Get referral info for each user
+    const subscriptionsWithReferrals = await Promise.all(subscriptions.map(async (sub) => {
+      // Get all referrals made by this user (where they are referrer)
+      const referrals = await Referral.find({ referrerId: sub.userId._id })
+        .populate('referredUserId', 'email displayName');
+
+      // Get active referrals (referred users with active paying subscriptions)
+      const activeReferrals = [];
+      for (const referral of referrals) {
+        if (!referral.referredUserId) continue;
+
+        const referredSub = await Subscription.findOne({
+          userId: referral.referredUserId._id,
+          status: 'active',
+          isActive: true
+        });
+
+        if (referredSub && referredSub.isActivelyPaying()) {
+          activeReferrals.push({
+            id: referral._id,
+            user: {
+              email: referral.referredUserId.email,
+              displayName: referral.referredUserId.displayName
+            },
+            activeSince: referral.firstActiveDate,
+            profitPerMonth: referral.profitPerMonth
+          });
+        }
+      }
+
+      // Calculate bonus from active referrals
+      const bonusAmount = activeReferrals.reduce((sum, r) => sum + r.profitPerMonth, 0);
+
+      // Count active stocks for this user
+      const activeStocks = await Subscription.countDocuments({
+        userId: sub.userId._id,
+        status: 'active',
+        isActive: true
+      });
+
+      // Net value: + means user pays, - means user profits
+      const monthlyFee = sub.monthlyFee || 10;
+      const netValue = monthlyFee - bonusAmount;
+
+      return {
+        id: sub._id,
+        user: sub.userId,
+        stockId: sub.stockId,
+        apiToken: sub.apiToken,
+        activeSince: sub.lastActivatedAt,
+        activeUntil: sub.activeUntil,
+        isActive: sub.isActive,
+        status: sub.status,
+        paymentProof: sub.paymentProof,
+        isActivelyPaying: sub.isActivelyPaying(),
+        // New fields
+        activeReferralsCount: activeReferrals.length,
+        activeReferrals: activeReferrals,
+        bonusAmount: bonusAmount,
+        activeStocksCount: activeStocks,
+        netValue: netValue
+      };
+    }));
+
+    res.json({
+      success: true,
+      subscriptions: subscriptionsWithReferrals
     });
   } catch (error) {
     res.status(500).json({
@@ -501,6 +589,96 @@ router.post('/admin/users/:userId/toggle-role', authenticate, requireAdmin, asyn
   }
 });
 
+// Admin: Update subscription API token
+router.put('/admin/subscriptions/:subscriptionId/token', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const { apiToken } = req.body;
+
+    if (!apiToken || apiToken.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'API token is required'
+      });
+    }
+
+    const subscription = await Subscription.findById(subscriptionId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    subscription.apiToken = apiToken.trim();
+    await subscription.save();
+
+    res.json({
+      success: true,
+      message: 'API token updated',
+      subscription: {
+        id: subscription._id,
+        apiToken: subscription.apiToken
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Toggle subscription active status (enable/disable)
+router.post('/admin/subscriptions/:subscriptionId/toggle', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+
+    const subscription = await Subscription.findById(subscriptionId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    // Toggle the active status
+    subscription.isActive = !subscription.isActive;
+
+    // If enabling and no activeUntil set, set it to 30 days from now
+    if (subscription.isActive && !subscription.activeUntil) {
+      const activeUntil = new Date();
+      activeUntil.setDate(activeUntil.getDate() + 30);
+      subscription.activeUntil = activeUntil;
+    }
+
+    // Update status based on isActive
+    if (subscription.isActive) {
+      subscription.status = 'active';
+    } else {
+      subscription.status = 'cancelled';
+    }
+
+    await subscription.save();
+
+    res.json({
+      success: true,
+      message: subscription.isActive ? 'Subscription enabled' : 'Subscription disabled',
+      subscription: {
+        id: subscription._id,
+        isActive: subscription.isActive,
+        status: subscription.status,
+        activeUntil: subscription.activeUntil
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // Get dashboard summary
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
@@ -559,5 +737,68 @@ router.get('/uploads/payment-proofs/:filename', authenticate, requireAdmin, (req
     res.status(404).json({ success: false, message: 'File not found' });
   }
 });
+
+// Admin: Get all expired subscriptions
+router.get('/admin/subscriptions/expired', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const subscriptions = await Subscription.find({ status: 'expired' })
+      .populate('userId', 'email displayName')
+      .sort({ updatedAt: -1 });
+
+    res.json({
+      success: true,
+      subscriptions: subscriptions.map(sub => ({
+        id: sub._id,
+        user: sub.userId,
+        stockId: sub.stockId,
+        apiToken: sub.apiToken,
+        activeSince: sub.lastActivatedAt,
+        activeUntil: sub.activeUntil,
+        paymentProof: sub.paymentProof,
+        expiredAt: sub.updatedAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Manually flag subscription as expired
+router.post('/admin/subscriptions/:subscriptionId/expire', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+
+    const subscription = await Subscription.findById(subscriptionId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    subscription.status = 'expired';
+    subscription.isActive = false;
+    await subscription.save();
+
+    res.json({
+      success: true,
+      message: 'Subscription marked as expired',
+      subscription: {
+        id: subscription._id,
+        status: subscription.status,
+        isActive: subscription.isActive
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 
 export default router;

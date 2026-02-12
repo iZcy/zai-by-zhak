@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LoginButton from './components/auth/LoginButton'
-import AdminPanel from './components/auth/AdminPanel'
 import SubscriptionPanel from './components/subscription/SubscriptionPanel'
 import AdminSubscriptionPanel from './components/subscription/AdminPanel'
 import './App.css'
@@ -30,7 +29,7 @@ function AppContent() {
               <iconify-icon icon="solar:leaf-linear" width="20" className="text-emerald-100" stroke-width="1.5"></iconify-icon>
               <span className="font-semibold tracking-tight text-sm text-emerald-100">ZAI</span>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               {/* Test User Switcher */}
               {import.meta.env.DEV && devUsers.length > 0 && (
                 <select
@@ -54,6 +53,7 @@ function AppContent() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-6 md:p-8 lg:p-12">
         <div className="max-w-5xl mx-auto space-y-8 fade-in">
+          {/* Subscription Section */}
           {isAdmin() ? (
             <AdminSubscriptionPanel />
           ) : (

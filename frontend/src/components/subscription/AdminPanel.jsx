@@ -11,6 +11,15 @@ export default function AdminSubscriptionPanel() {
   const [loading, setLoading] = useState(true);
   const [imageLoadErrors, setImageLoadErrors] = useState({});
   const [imageDataUrls, setImageDataUrls] = useState({});
+  const [editingToken, setEditingToken] = useState(null);
+  const [tokenValue, setTokenValue] = useState('');
+  const [showReferralsPopup, setShowReferralsPopup] = useState(null);
+
+  // Filters
+  const [activeUntilFrom, setActiveUntilFrom] = useState('');
+  const [activeUntilTo, setActiveUntilTo] = useState('');
+  const [expiredFilter, setExpiredFilter] = useState('all'); // 'all', 'yes', 'no'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'enabled', 'disabled'
 
   useEffect(() => {
     // Skip auth check in dev mode
@@ -19,19 +28,19 @@ export default function AdminSubscriptionPanel() {
 
   const fetchData = async () => {
     try {
-      const [pendingRes, activeRes] = await Promise.all([
+      const [pendingRes, subscriptionsRes] = await Promise.all([
         api.get('/subscription/admin/subscriptions/pending').catch(() => ({ data: { subscriptions: [] } })),
-        api.get('/subscription/admin/subscriptions/active').catch(() => ({ data: { subscriptions: [] } }))
+        api.get('/subscription/admin/subscriptions/all').catch(() => ({ data: { subscriptions: [] } }))
       ]);
 
       const pending = pendingRes.data.subscriptions || [];
-      const active = activeRes.data.subscriptions || [];
+      const subscriptions = subscriptionsRes.data.subscriptions || [];
 
       setPendingSubscriptions(pending);
-      setActiveSubscriptions(active);
+      setActiveSubscriptions(subscriptions);
 
       // Pre-fetch payment proof images with authentication
-      await fetchPaymentProofImages([...pending, ...active]);
+      await fetchPaymentProofImages([...pending, ...subscriptions]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
     } finally {
@@ -82,16 +91,22 @@ export default function AdminSubscriptionPanel() {
     }
 
     try {
-      await api.post(`/subscription/admin/subscriptions/${selectedSubscription._id}/approve`, {
+      const subId = selectedSubscription._id || selectedSubscription.id;
+      console.log('Approving subscription:', subId, 'API Token:', apiToken);
+
+      const response = await api.post(`/subscription/admin/subscriptions/${subId}/approve`, {
         apiToken: apiToken
       });
 
+      console.log('Approve response:', response.data);
       alert('Subscription approved!');
       setSelectedSubscription(null);
       setApiToken('');
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to approve subscription');
+      console.error('Approve error:', error);
+      console.error('Error response:', error.response);
+      alert(error.response?.data?.message || error.message || 'Failed to approve subscription');
     }
   };
 
@@ -120,6 +135,85 @@ export default function AdminSubscriptionPanel() {
       alert(error.response?.data?.message || 'Failed to toggle role');
     }
   };
+
+  const handleUpdateToken = async (subscriptionId) => {
+    try {
+      await api.put(`/subscription/admin/subscriptions/${subscriptionId}/token`, {
+        apiToken: tokenValue
+      });
+      alert('API token updated!');
+      setEditingToken(null);
+      setTokenValue('');
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Failed to update API token');
+    }
+  };
+
+  const handleToggleSubscription = async (subscriptionId) => {
+    try {
+      const response = await api.post(`/subscription/admin/subscriptions/${subscriptionId}/toggle`);
+      alert(response.data.message);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Failed to toggle subscription');
+    }
+  };
+
+  // Sort subscriptions: expired but enabled first, then by date
+  const sortedSubscriptions = [...activeSubscriptions].sort((a, b) => {
+    const aIsExpiredButEnabled = a.isActive && a.activeUntil && new Date(a.activeUntil) < new Date();
+    const bIsExpiredButEnabled = b.isActive && b.activeUntil && new Date(b.activeUntil) < new Date();
+
+    // Expired but enabled subscriptions first
+    if (aIsExpiredButEnabled && !bIsExpiredButEnabled) return -1;
+    if (!aIsExpiredButEnabled && bIsExpiredButEnabled) return 1;
+
+    // Then sort by activeUntil (newest first)
+    const aDate = a.activeUntil ? new Date(a.activeUntil).getTime() : 0;
+    const bDate = b.activeUntil ? new Date(b.activeUntil).getTime() : 0;
+    return bDate - aDate;
+  });
+
+  // Filter subscriptions based on filter states
+  const filteredSubscriptions = sortedSubscriptions.filter((sub) => {
+    // Filter by Active Until date range
+    if (activeUntilFrom && sub.activeUntil) {
+      const fromDate = new Date(activeUntilFrom);
+      const untilDate = new Date(sub.activeUntil);
+      if (untilDate < fromDate) return false;
+    }
+    if (activeUntilTo && sub.activeUntil) {
+      const toDate = new Date(activeUntilTo);
+      toDate.setHours(23, 59, 59, 999); // End of day
+      const untilDate = new Date(sub.activeUntil);
+      if (untilDate > toDate) return false;
+    }
+
+    // Filter by Expired (yes/no)
+    if (expiredFilter !== 'all') {
+      const isExpired = sub.activeUntil && new Date(sub.activeUntil) < new Date();
+      if (expiredFilter === 'yes' && !isExpired) return false;
+      if (expiredFilter === 'no' && isExpired) return false;
+    }
+
+    // Filter by Status (enabled/disabled)
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'enabled' && !sub.isActive) return false;
+      if (statusFilter === 'disabled' && sub.isActive) return false;
+    }
+
+    return true;
+  });
+
+  const clearFilters = () => {
+    setActiveUntilFrom('');
+    setActiveUntilTo('');
+    setExpiredFilter('all');
+    setStatusFilter('all');
+  };
+
+  const hasActiveFilters = activeUntilFrom || activeUntilTo || expiredFilter !== 'all' || statusFilter !== 'all';
 
   if (loading) return <div className="text-stone-400">Loading...</div>;
 
@@ -197,14 +291,77 @@ export default function AdminSubscriptionPanel() {
         )}
       </div>
 
-      {/* Active Subscriptions */}
+      {/* Subscriptions */}
       <div className="p-6 rounded-xl border border-stone-800 bg-black">
-        <h2 className="text-sm font-medium text-stone-100 mb-4">
-          Active Subscriptions ({activeSubscriptions.length})
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-stone-100">
+            Subscriptions ({filteredSubscriptions.length} / {activeSubscriptions.length})
+          </h2>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="text-xs px-2 py-1 rounded border border-stone-700 text-stone-400 hover:bg-stone-900 hover:text-stone-200"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
 
-        {activeSubscriptions.length === 0 ? (
-          <p className="text-stone-500 text-center py-8">No active subscriptions</p>
+        {/* Filters */}
+        <div className="mb-4 p-3 rounded-lg border border-stone-800 bg-stone-900/30">
+          <div className="flex flex-wrap gap-4">
+            {/* Active Until Date Range */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500">Active Until:</label>
+              <input
+                type="date"
+                value={activeUntilFrom}
+                onChange={(e) => setActiveUntilFrom(e.target.value)}
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700"
+              />
+              <span className="text-xs text-stone-600">to</span>
+              <input
+                type="date"
+                value={activeUntilTo}
+                onChange={(e) => setActiveUntilTo(e.target.value)}
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700"
+              />
+            </div>
+
+            {/* Expired Filter */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500">Expired:</label>
+              <select
+                value={expiredFilter}
+                onChange={(e) => setExpiredFilter(e.target.value)}
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700"
+              >
+                <option value="all">All</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+
+            {/* Status Filter */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500">Status:</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700"
+              >
+                <option value="all">All</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {filteredSubscriptions.length === 0 ? (
+          <p className="text-stone-500 text-center py-8">
+            {hasActiveFilters ? 'No subscriptions match the filters' : 'No active subscriptions'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -213,34 +370,155 @@ export default function AdminSubscriptionPanel() {
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">User</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Stock ID</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">API Token</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Referrals</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Bonus</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Stocks</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Net Value</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Until</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Expired</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Status</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Receipt</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {activeSubscriptions.map((sub) => (
-                  <tr key={sub.id} className="border-b border-stone-800">
+                {filteredSubscriptions.map((sub) => {
+                  const isExpiredButEnabled = sub.isActive && sub.activeUntil && new Date(sub.activeUntil) < new Date();
+                  return (
+                    <tr
+                      key={sub.id}
+                      className={`border-b ${isExpiredButEnabled ? 'bg-orange-950/30 border-orange-900/50' : 'border-stone-800'}`}
+                    >
                     <td className="py-3 px-4 text-sm text-stone-300">{sub.user.displayName || sub.user.email}</td>
                     <td className="py-3 px-4 text-sm font-mono text-stone-400">{sub.stockId}</td>
                     <td className="py-3 px-4">
-                      <code className="text-xs bg-stone-900 px-2 py-1 rounded text-emerald-400">
-                        {sub.apiToken?.substring(0, 16)}...
-                      </code>
+                      {editingToken === sub.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={tokenValue}
+                            onChange={(e) => setTokenValue(e.target.value)}
+                            className="w-48 px-2 py-1 text-xs bg-stone-900 border border-stone-700 rounded text-emerald-400 focus:outline-none focus:border-emerald-600"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleUpdateToken(sub.id)}
+                            className="text-emerald-400 hover:text-emerald-300"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingToken(null);
+                              setTokenValue('');
+                            }}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <code
+                            className="text-xs bg-stone-900 px-2 py-1 rounded text-emerald-400 cursor-pointer hover:bg-stone-800"
+                            onClick={() => {
+                              setEditingToken(sub.id);
+                              setTokenValue(sub.apiToken || '');
+                            }}
+                            title="Click to edit"
+                          >
+                            {sub.apiToken || 'Not set'}
+                          </code>
+                          <button
+                            onClick={() => {
+                              setEditingToken(sub.id);
+                              setTokenValue(sub.apiToken || '');
+                            }}
+                            className="text-stone-500 hover:text-stone-300 text-xs"
+                          >
+                            ✎
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <button
+                        onClick={() => sub.activeReferralsCount > 0 && setShowReferralsPopup(sub)}
+                        className={`text-sm ${sub.activeReferralsCount > 0 ? 'text-blue-400 hover:text-blue-300 cursor-pointer underline' : 'text-stone-500'}`}
+                        disabled={sub.activeReferralsCount === 0}
+                      >
+                        {sub.activeReferralsCount || 0}
+                      </button>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-emerald-400 font-medium">
+                      ${sub.bonusAmount?.toFixed(2) || '0.00'}
                     </td>
                     <td className="py-3 px-4 text-sm text-stone-300">
-                      {new Date(sub.activeUntil).toLocaleDateString()}
+                      {sub.activeStocksCount || 0}
+                    </td>
+                    <td className="py-3 px-4 text-sm font-medium">
+                      <span className={(sub.netValue || 0) >= 0 ? 'text-red-400' : 'text-emerald-400'}>
+                        {(sub.netValue || 0) >= 0 ? '+' : ''}${Math.abs(sub.netValue || 0).toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-stone-300">
+                      {sub.activeUntil ? new Date(sub.activeUntil).toLocaleDateString() : '-'}
+                    </td>
+                    <td className="py-3 px-4">
+                      {sub.activeUntil ? (
+                        new Date(sub.activeUntil) < new Date() ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-950 text-red-300 border border-red-900">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-950 text-emerald-300 border border-emerald-900">
+                            No
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-stone-600 text-xs">-</span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                        sub.isActivelyPaying
+                        sub.isActive
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
-                          : 'bg-yellow-950 text-yellow-300 border border-yellow-900'
+                          : 'bg-red-950 text-red-300 border border-red-900'
                       }`}>
-                        {sub.isActivelyPaying ? 'Active' : 'Expiring Soon'}
+                        {sub.isActive ? 'Enabled' : 'Disabled'}
                       </span>
                     </td>
+                    <td className="py-3 px-4">
+                      {sub.paymentProof && imageDataUrls[sub.id] ? (
+                        <img
+                          src={imageDataUrls[sub.id]}
+                          alt="Receipt"
+                          className="w-12 h-12 object-cover rounded border border-stone-700 cursor-pointer hover:border-emerald-700"
+                          onClick={() => window.open(imageDataUrls[sub.id], '_blank')}
+                        />
+                      ) : sub.paymentProof ? (
+                        <div className="w-12 h-12 rounded border border-stone-800 bg-stone-900/50 flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-emerald-400"></div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-stone-600">No receipt</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <button
+                        onClick={() => handleToggleSubscription(sub.id)}
+                        className={`text-xs px-2 py-1 rounded border ${
+                          sub.isActive
+                            ? 'border-red-900 text-red-400 hover:bg-red-950'
+                            : 'border-emerald-900 text-emerald-400 hover:bg-emerald-950'
+                        }`}
+                      >
+                        {sub.isActive ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -295,6 +573,65 @@ export default function AdminSubscriptionPanel() {
                 Approve & Activate
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Referrals Popup */}
+      {showReferralsPopup && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-stone-100">
+                Active Referrals ({showReferralsPopup.user?.displayName || showReferralsPopup.user?.email})
+              </h2>
+              <button
+                onClick={() => setShowReferralsPopup(null)}
+                className="text-stone-500 hover:text-stone-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            {showReferralsPopup.activeReferrals?.length > 0 ? (
+              <div className="space-y-3">
+                {showReferralsPopup.activeReferrals.map((ref, idx) => (
+                  <div key={ref.id || idx} className="p-3 rounded-lg border border-stone-800 bg-stone-900/50">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-stone-200">{ref.user?.displayName || ref.user?.email}</p>
+                        <p className="text-xs text-stone-500">{ref.user?.email}</p>
+                      </div>
+                      <span className="text-emerald-400 text-sm font-medium">
+                        +${ref.profitPerMonth?.toFixed(2) || '2.50'}/mo
+                      </span>
+                    </div>
+                    {ref.activeSince && (
+                      <p className="text-xs text-stone-600 mt-2">
+                        Active since: {new Date(ref.activeSince).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                <div className="pt-3 border-t border-stone-800">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-400">Total Bonus:</span>
+                    <span className="text-emerald-400 font-medium">
+                      ${showReferralsPopup.bonusAmount?.toFixed(2) || '0.00'}/mo
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-stone-500 text-center py-4">No active referrals</p>
+            )}
+
+            <button
+              onClick={() => setShowReferralsPopup(null)}
+              className="w-full mt-4 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

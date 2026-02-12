@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.js'
 import subscriptionRoutes from './routes/subscription.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { connectDB, disconnectDB } from './config/database.js'
+import { createServer } from 'http'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -24,9 +25,7 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-  origin: NODE_ENV === 'production'
-    ? process.env.FRONTEND_URL
-    : ['http://localhost:3000', 'http://frontend:3000'],
+  origin: ['http://localhost:3000', 'http://frontend:3000', 'http://127.0.0.1:3000', 'http://0.0.0.0:3000', 'http://localhost:3500', 'http://127.0.0.1:3500', 'http://0.0.0.0:3500'],
   credentials: true
 }))
 
@@ -114,6 +113,9 @@ const startServer = async () => {
     if (MONGODB_URI) {
       await connectDB();
 
+      // Wait for MongoDB to be ready before starting server
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
       // Create dummy accounts for development
       const User = (await import('./models/User.js')).default;
 
@@ -156,7 +158,8 @@ const startServer = async () => {
     }
 
     // Start Express server
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = createServer(app)
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running in ${NODE_ENV} mode`)
       console.log(`📡 Listening on port ${PORT}`)
       console.log(`🏥 Health check: http://localhost:${PORT}/health`)
@@ -195,7 +198,7 @@ const gracefulShutdown = async (signal) => {
 }
 
 // Start the server
-const server = startServer();
+await startServer();
 
 // Handle shutdown signals
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
