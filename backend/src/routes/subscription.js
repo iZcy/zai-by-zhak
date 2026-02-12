@@ -418,16 +418,21 @@ router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, r
       // Calculate bonus from active referrals
       const bonusAmount = activeReferrals.reduce((sum, r) => sum + r.profitPerMonth, 0);
 
-      // Count active stocks for this user
+      // Count active stocks for this user (only enabled and not expired)
       const activeStocks = await Subscription.countDocuments({
         userId: sub.userId._id,
         status: 'active',
         isActive: true
       });
 
-      // Net value: + means user pays, - means user profits
+      // Net value calculation for this subscription:
+      // Only count cost if subscription is active AND not expired
+      // + means user pays, - means user profits (from referrals)
+      const isExpired = sub.activeUntil && new Date(sub.activeUntil) < new Date();
+      const isPayingStock = sub.isActive && sub.status === 'active' && !isExpired;
       const monthlyFee = sub.monthlyFee || 10;
-      const netValue = monthlyFee - bonusAmount;
+      const stockCost = isPayingStock ? monthlyFee : 0;
+      const netValue = stockCost - bonusAmount;
 
       return {
         id: sub._id,
