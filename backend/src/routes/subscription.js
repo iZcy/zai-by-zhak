@@ -385,13 +385,59 @@ router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, r
       .populate('userId', 'email displayName')
       .sort({ updatedAt: -1 });
 
-    // Get referral info for each user
-    const subscriptionsWithReferrals = await Promise.all(subscriptions.map(async (sub) => {
-      // Get all referrals made by this user (where they are referrer)
-      const referrals = await Referral.find({ referrerId: sub.userId._id })
+    res.json({
+      success: true,
+      subscriptions: subscriptions.map(sub => ({
+        id: sub._id,
+        user: sub.userId,
+        stockId: sub.stockId,
+        apiToken: sub.apiToken,
+        activeSince: sub.lastActivatedAt,
+        activeUntil: sub.activeUntil,
+        isActive: sub.isActive,
+        status: sub.status,
+        paymentProof: sub.paymentProof,
+        isActivelyPaying: sub.isActivelyPaying()
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Get users with subscription/referral stats
+router.get('/admin/users/stats', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // Get all users with subscriptions
+    const usersWithSubs = await Subscription.distinct('userId');
+    const users = await User.find({ _id: { $in: usersWithSubs } })
+      .select('email displayName role')
+      .sort({ email: 1 });
+
+    const usersStats = await Promise.all(users.map(async (user) => {
+      // Count active paying stocks
+      const activeSubscriptions = await Subscription.find({
+        userId: user._id,
+        status: 'active',
+        isActive: true
+      });
+
+      let activeStocks = 0;
+      let stocksFee = 0;
+      for (const sub of activeSubscriptions) {
+        if (sub.isActivelyPaying()) {
+          activeStocks++;
+          stocksFee += sub.monthlyFee || 10;
+        }
+      }
+
+      // Get active referrals
+      const referrals = await Referral.find({ referrerId: user._id })
         .populate('referredUserId', 'email displayName');
 
-      // Get active referrals (referred users with active paying subscriptions)
       const activeReferrals = [];
       for (const referral of referrals) {
         if (!referral.referredUserId) continue;
@@ -415,48 +461,26 @@ router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, r
         }
       }
 
-      // Calculate bonus from active referrals
-      const bonusAmount = activeReferrals.reduce((sum, r) => sum + r.profitPerMonth, 0);
-
-      // Count active stocks for this user (only enabled and not expired)
-      const activeStocks = await Subscription.countDocuments({
-        userId: sub.userId._id,
-        status: 'active',
-        isActive: true
-      });
-
-      // Net value calculation for this subscription:
-      // Only count cost if subscription is active AND not expired
-      // + means user pays, - means user profits (from referrals)
-      const isExpired = sub.activeUntil && new Date(sub.activeUntil) < new Date();
-      const isPayingStock = sub.isActive && sub.status === 'active' && !isExpired;
-      const monthlyFee = sub.monthlyFee || 10;
-      const stockCost = isPayingStock ? monthlyFee : 0;
-      const netValue = stockCost - bonusAmount;
+      const bonus = activeReferrals.reduce((sum, r) => sum + r.profitPerMonth, 0);
+      const netValue = stocksFee - bonus;
 
       return {
-        id: sub._id,
-        user: sub.userId,
-        stockId: sub.stockId,
-        apiToken: sub.apiToken,
-        activeSince: sub.lastActivatedAt,
-        activeUntil: sub.activeUntil,
-        isActive: sub.isActive,
-        status: sub.status,
-        paymentProof: sub.paymentProof,
-        isActivelyPaying: sub.isActivelyPaying(),
-        // New fields
+        id: user._id,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        activeStocks,
+        stocksFee,
         activeReferralsCount: activeReferrals.length,
-        activeReferrals: activeReferrals,
-        bonusAmount: bonusAmount,
-        activeStocksCount: activeStocks,
-        netValue: netValue
+        activeReferrals,
+        bonus,
+        netValue
       };
     }));
 
     res.json({
       success: true,
-      subscriptions: subscriptionsWithReferrals
+      users: usersStats
     });
   } catch (error) {
     res.status(500).json({

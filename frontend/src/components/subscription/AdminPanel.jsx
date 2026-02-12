@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 export default function AdminSubscriptionPanel() {
   const [pendingSubscriptions, setPendingSubscriptions] = useState([]);
   const [activeSubscriptions, setActiveSubscriptions] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [usersStats, setUsersStats] = useState([]);
   const [selectedSubscription, setSelectedSubscription] = useState(null);
   const [apiToken, setApiToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -28,16 +28,19 @@ export default function AdminSubscriptionPanel() {
 
   const fetchData = async () => {
     try {
-      const [pendingRes, subscriptionsRes] = await Promise.all([
+      const [pendingRes, subscriptionsRes, usersRes] = await Promise.all([
         api.get('/subscription/admin/subscriptions/pending').catch(() => ({ data: { subscriptions: [] } })),
-        api.get('/subscription/admin/subscriptions/all').catch(() => ({ data: { subscriptions: [] } }))
+        api.get('/subscription/admin/subscriptions/all').catch(() => ({ data: { subscriptions: [] } })),
+        api.get('/subscription/admin/users/stats').catch(() => ({ data: { users: [] } }))
       ]);
 
       const pending = pendingRes.data.subscriptions || [];
       const subscriptions = subscriptionsRes.data.subscriptions || [];
+      const users = usersRes.data.users || [];
 
       setPendingSubscriptions(pending);
       setActiveSubscriptions(subscriptions);
+      setUsersStats(users);
 
       // Pre-fetch payment proof images with authentication
       await fetchPaymentProofImages([...pending, ...subscriptions]);
@@ -291,6 +294,61 @@ export default function AdminSubscriptionPanel() {
         )}
       </div>
 
+      {/* Users Stats */}
+      <div className="p-6 rounded-xl border border-stone-800 bg-black">
+        <h2 className="text-sm font-medium text-stone-100 mb-4">
+          Users ({usersStats.length})
+        </h2>
+
+        {usersStats.length === 0 ? (
+          <p className="text-stone-500 text-center py-8">No users with subscriptions</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-stone-800">
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">User</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Stocks</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Stocks Fee</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Referrals</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Bonus</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Net Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usersStats.map((user) => (
+                  <tr key={user.id} className="border-b border-stone-800">
+                    <td className="py-3 px-4">
+                      <div>
+                        <p className="text-sm text-stone-200">{user.displayName || user.email}</p>
+                        <p className="text-xs text-stone-500">{user.email}</p>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-stone-300">{user.activeStocks}</td>
+                    <td className="py-3 px-4 text-sm text-stone-300">${user.stocksFee.toFixed(2)}</td>
+                    <td className="py-3 px-4">
+                      <button
+                        onClick={() => user.activeReferralsCount > 0 && setShowReferralsPopup(user)}
+                        className={`text-sm ${user.activeReferralsCount > 0 ? 'text-blue-400 hover:text-blue-300 cursor-pointer underline' : 'text-stone-500'}`}
+                        disabled={user.activeReferralsCount === 0}
+                      >
+                        {user.activeReferralsCount}
+                      </button>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-emerald-400 font-medium">${user.bonus.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-sm font-medium">
+                      <span className={user.netValue >= 0 ? 'text-red-400' : 'text-emerald-400'}>
+                        {user.netValue >= 0 ? '+' : ''}${Math.abs(user.netValue).toFixed(2)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Subscriptions */}
       <div className="p-6 rounded-xl border border-stone-800 bg-black">
         <div className="flex items-center justify-between mb-4">
@@ -370,10 +428,6 @@ export default function AdminSubscriptionPanel() {
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">User</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Stock ID</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">API Token</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Referrals</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Bonus</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Stocks</th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Net Value</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Until</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Expired</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Status</th>
@@ -440,26 +494,6 @@ export default function AdminSubscriptionPanel() {
                           </button>
                         </div>
                       )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <button
-                        onClick={() => sub.activeReferralsCount > 0 && setShowReferralsPopup(sub)}
-                        className={`text-sm ${sub.activeReferralsCount > 0 ? 'text-blue-400 hover:text-blue-300 cursor-pointer underline' : 'text-stone-500'}`}
-                        disabled={sub.activeReferralsCount === 0}
-                      >
-                        {sub.activeReferralsCount || 0}
-                      </button>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-emerald-400 font-medium">
-                      ${sub.bonusAmount?.toFixed(2) || '0.00'}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-stone-300">
-                      {sub.activeStocksCount || 0}
-                    </td>
-                    <td className="py-3 px-4 text-sm font-medium">
-                      <span className={(sub.netValue || 0) >= 0 ? 'text-red-400' : 'text-emerald-400'}>
-                        {(sub.netValue || 0) >= 0 ? '+' : ''}${Math.abs(sub.netValue || 0).toFixed(2)}
-                      </span>
                     </td>
                     <td className="py-3 px-4 text-sm text-stone-300">
                       {sub.activeUntil ? new Date(sub.activeUntil).toLocaleDateString() : '-'}
@@ -583,7 +617,7 @@ export default function AdminSubscriptionPanel() {
           <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md max-h-96 overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-medium text-stone-100">
-                Active Referrals ({showReferralsPopup.user?.displayName || showReferralsPopup.user?.email})
+                Active Referrals ({showReferralsPopup.displayName || showReferralsPopup.email})
               </h2>
               <button
                 onClick={() => setShowReferralsPopup(null)}
