@@ -41,50 +41,13 @@ export const AuthProvider = ({ children }) => {
       if (response.data.user) {
         setUser(response.data.user);
       } else {
-        // For development, auto-login as first dev user
-        if (import.meta.env.DEV) {
-          await devLogin('admin@zai.dev');
-        } else {
-          setUser(null);
-        }
-      }
-    } catch (error) {
-      // For development, auto-login as first dev user
-      if (import.meta.env.DEV) {
-        await devLogin('admin@zai.dev');
-      } else {
         setUser(null);
       }
+    } catch (error) {
+      setUser(null);
     } finally {
       setLoading(false);
     }
-  };
-
-  const devLogin = async (email) => {
-    try {
-      console.log('Attempting dev login for email:', email);
-      const response = await api.post('/auth/dev/login', { email });
-      console.log('Dev login response:', response.data);
-
-      if (response.data.success && response.data.user) {
-        // Store token
-        if (response.data.token) {
-          localStorage.setItem('token', response.data.token);
-        }
-        setUser(response.data.user);
-        console.log('User set successfully:', response.data.user);
-      }
-    } catch (error) {
-      console.error('Dev login failed:', error);
-      setUser(null);
-    }
-  };
-
-  const switchTestUser = async (email) => {
-    console.log('switchTestUser called with email:', email);
-    setLoading(true);
-    await devLogin(email);
-    setLoading(false);
   };
 
   const loginWithGoogle = () => {
@@ -96,30 +59,21 @@ export const AuthProvider = ({ children }) => {
     const scope = 'profile email';
     const responseType = 'code';
 
-    // Debug: Log the redirect URI
-    console.log('🔍 Google OAuth Debug:');
-    console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
-    console.log('apiBase:', apiBase);
-    console.log('redirectUri:', redirectUri);
-
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(clientId)}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `response_type=${encodeURIComponent(responseType)}&` +
       `scope=${encodeURIComponent(scope)}`;
 
-    console.log('Full auth URL:', authUrl);
     window.location.href = authUrl;
   };
 
   const logout = async () => {
     try {
       await api.post('/auth/logout');
-      setUser(null);
-      localStorage.removeItem('token');
     } catch (error) {
-      console.error('Logout failed:', error);
-      // Still clear local state on error
+      // Logout failed
+    } finally {
       setUser(null);
       localStorage.removeItem('token');
     }
@@ -139,7 +93,6 @@ export const AuthProvider = ({ children }) => {
     loginWithGoogle,
     logout,
     isAdmin,
-    switchTestUser,
     refreshUser,
     isAuthenticated: !!user
   };

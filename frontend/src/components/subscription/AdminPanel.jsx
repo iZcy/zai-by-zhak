@@ -71,7 +71,7 @@ export default function AdminSubscriptionPanel() {
       // Pre-fetch withdraw receipt images
       await fetchWithdrawReceipts(withdraws);
     } catch (error) {
-      console.error('Error fetching admin data:', error);
+      // Error fetching admin data
     } finally {
       setLoading(false);
     }
@@ -106,7 +106,6 @@ export default function AdminSubscriptionPanel() {
             setImageLoadErrors(prev => ({ ...prev, [sub._id || sub.id]: true }));
           }
         } catch (err) {
-          console.error('Failed to load image:', err);
           setImageLoadErrors(prev => ({ ...prev, [sub._id || sub.id]: true }));
         }
       }
@@ -136,7 +135,7 @@ export default function AdminSubscriptionPanel() {
             setWithdrawReceiptUrls(prev => ({ ...prev, [w.id]: dataUrl }));
           }
         } catch (err) {
-          console.error('Failed to load withdraw receipt:', err);
+          // Failed to load withdraw receipt
         }
       }
     }
@@ -150,20 +149,16 @@ export default function AdminSubscriptionPanel() {
 
     try {
       const subId = selectedSubscription._id || selectedSubscription.id;
-      console.log('Approving subscription:', subId, 'API Token:', apiToken);
 
-      const response = await api.post(`/subscription/admin/subscriptions/${subId}/approve`, {
+      await api.post(`/subscription/admin/subscriptions/${subId}/approve`, {
         apiToken: apiToken
       });
 
-      console.log('Approve response:', response.data);
       toast.showSuccess('Subscription approved!');
       setSelectedSubscription(null);
       setApiToken('');
       fetchData();
     } catch (error) {
-      console.error('Approve error:', error);
-      console.error('Error response:', error.response);
       toast.showError(error.response?.data?.message || error.message || 'Failed to approve subscription');
     }
   };
@@ -401,9 +396,18 @@ export default function AdminSubscriptionPanel() {
                     {/* User Profile Section */}
                     <div className="p-3 rounded-lg border border-stone-800 bg-stone-900/30 mb-3">
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="w-10 h-10 rounded-full bg-emerald-950 flex items-center justify-center">
-                          <iconify-icon icon="solar:user-linear" width="20" className="text-emerald-400"></iconify-icon>
-                        </div>
+                        {sub.user.picture ? (
+                          <img
+                            src={sub.user.picture}
+                            alt={sub.user.displayName}
+                            className="w-10 h-10 rounded-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-emerald-950 flex items-center justify-center">
+                            <iconify-icon icon="solar:user-linear" width="20" className="text-emerald-400"></iconify-icon>
+                          </div>
+                        )}
                         <div>
                           <p className="text-sm font-medium text-stone-200">{sub.user.displayName || sub.user.email}</p>
                           <p className="text-xs text-stone-500">{sub.user.email}</p>
@@ -512,9 +516,18 @@ export default function AdminSubscriptionPanel() {
                     {/* User Profile Section */}
                     <div className="p-3 rounded-lg border border-stone-800 bg-stone-900/30 mb-3">
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-950 flex items-center justify-center">
-                          <iconify-icon icon="solar:wallet-linear" width="20" className="text-blue-400"></iconify-icon>
-                        </div>
+                        {w.user?.picture ? (
+                          <img
+                            src={w.user.picture}
+                            alt={w.user.displayName}
+                            className="w-10 h-10 rounded-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-blue-950 flex items-center justify-center">
+                            <iconify-icon icon="solar:wallet-linear" width="20" className="text-blue-400"></iconify-icon>
+                          </div>
+                        )}
                         <div>
                           <p className="text-sm font-medium text-stone-200">{w.user?.displayName || w.user?.email}</p>
                           <p className="text-xs text-stone-500">{w.user?.email}</p>
@@ -601,9 +614,25 @@ export default function AdminSubscriptionPanel() {
                 {withdrawRequests.filter(w => w.status !== 'pending').map((w) => (
                   <tr key={w.id} className="border-b border-stone-800">
                     <td className="py-3 px-4">
-                      <div>
-                        <p className="text-sm text-stone-200">{w.user?.displayName || w.user?.email}</p>
-                        <p className="text-xs text-stone-500">{w.user?.email}</p>
+                      <div className="flex items-center gap-3">
+                        {w.user?.picture ? (
+                          <img
+                            src={w.user.picture}
+                            alt={w.user.displayName}
+                            className="w-8 h-8 rounded-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center">
+                            <span className="text-xs font-semibold text-stone-400">
+                              {w.user?.email?.slice(0, 2).toUpperCase()}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm text-stone-200">{w.user?.displayName || w.user?.email}</p>
+                          <p className="text-xs text-stone-500">{w.user?.email}</p>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -684,9 +713,25 @@ export default function AdminSubscriptionPanel() {
                 {paginatedUsers.map((user) => (
                   <tr key={user.id} className="border-b border-stone-800">
                     <td className="py-3 px-4">
-                      <div>
-                        <p className="text-sm text-stone-200">{user.displayName || user.email}</p>
-                        <p className="text-xs text-stone-500">{user.email}</p>
+                      <div className="flex items-center gap-3">
+                        {user.picture ? (
+                          <img
+                            src={user.picture}
+                            alt={user.displayName}
+                            className="w-8 h-8 rounded-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-stone-800 flex items-center justify-center">
+                            <span className="text-xs font-semibold text-stone-400">
+                              {user.email?.slice(0, 2).toUpperCase()}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm text-stone-200">{user.displayName || user.email}</p>
+                          <p className="text-xs text-stone-500">{user.email}</p>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-stone-300">{user.activeStocks}</td>

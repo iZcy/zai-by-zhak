@@ -613,7 +613,7 @@ router.post('/cancel/:subscriptionId', authenticate, async (req, res) => {
 router.get('/admin/subscriptions/pending', authenticate, requireAdmin, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ status: 'pending' })
-      .populate('userId', 'email displayName whatsappNumber bankProvider bankNumber')
+      .populate('userId', 'email displayName picture whatsappNumber bankProvider bankNumber')
       .populate('continuedFrom', 'stockId activeUntil')
       .sort({ createdAt: -1 });
 
@@ -647,7 +647,7 @@ router.get('/admin/subscriptions/pending', authenticate, requireAdmin, async (re
 router.get('/admin/subscriptions/active', authenticate, requireAdmin, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ status: 'active' })
-      .populate('userId', 'email displayName')
+      .populate('userId', 'email displayName picture')
       .sort({ activeUntil: -1 });
 
     res.json({
@@ -677,7 +677,7 @@ router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, r
     const subscriptions = await Subscription.find({
       status: { $in: ['active', 'cancelled', 'rejected', 'expired'] }
     })
-      .populate('userId', 'email displayName')
+      .populate('userId', 'email displayName picture')
       .sort({ updatedAt: -1 });
 
     res.json({
@@ -710,7 +710,7 @@ router.get('/admin/users/stats', authenticate, requireAdmin, async (req, res) =>
     // Get all users with subscriptions
     const usersWithSubs = await Subscription.distinct('userId');
     const users = await User.find({ _id: { $in: usersWithSubs } })
-      .select('email displayName role withdrawableBalance')
+      .select('email displayName picture role withdrawableBalance')
       .sort({ email: 1 });
 
     const usersStats = await Promise.all(users.map(async (user) => {
@@ -764,6 +764,7 @@ router.get('/admin/users/stats', authenticate, requireAdmin, async (req, res) =>
         id: user._id,
         email: user.email,
         displayName: user.displayName,
+        picture: user.picture,
         role: user.role,
         activeStocks,
         stocksFee,
@@ -1152,7 +1153,7 @@ router.get('/uploads/payment-proofs/:filename', authenticate, requireAdmin, (req
 router.get('/admin/subscriptions/expired', authenticate, requireAdmin, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ status: 'expired' })
-      .populate('userId', 'email displayName')
+      .populate('userId', 'email displayName picture')
       .sort({ updatedAt: -1 });
 
     res.json({
@@ -1294,7 +1295,7 @@ router.post('/withdraw/request', authenticate, async (req, res) => {
 router.get('/admin/withdraw/requests', authenticate, requireAdmin, async (req, res) => {
   try {
     const withdraws = await Withdraw.find()
-      .populate('userId', 'email displayName whatsappNumber bankProvider bankNumber')
+      .populate('userId', 'email displayName picture whatsappNumber bankProvider bankNumber')
       .sort({ createdAt: -1 });
 
     res.json({

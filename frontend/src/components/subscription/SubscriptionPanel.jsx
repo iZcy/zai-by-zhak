@@ -64,7 +64,7 @@ export default function SubscriptionPanel() {
         const data = await response.json();
         setExchangeRate(data.rates.IDR);
       } catch (error) {
-        console.error('Failed to fetch exchange rate:', error);
+        // Failed to fetch exchange rate
       }
     };
     fetchExchangeRate();
@@ -72,10 +72,6 @@ export default function SubscriptionPanel() {
 
   // Update referredByCode when user changes
   useEffect(() => {
-    console.log('User changed in SubscriptionPanel:', {
-      email: user?.email,
-      referralCodeUsed: user?.referralCodeUsed
-    });
     if (user?.referralCodeUsed) {
       setReferredByCode(user.referralCodeUsed);
     } else {
@@ -84,7 +80,6 @@ export default function SubscriptionPanel() {
   }, [user]);
 
   const fetchData = async () => {
-    console.log('fetchData called, user:', user?.email);
     try {
       const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes, withdrawRes, continuableRes] = await Promise.all([
         api.get('/subscription/dashboard'),
@@ -94,16 +89,6 @@ export default function SubscriptionPanel() {
         api.get('/subscription/withdraw/history').catch(() => ({ data: { withdraws: [] } })),
         api.get('/subscription/continuable').catch(() => ({ data: { continuableStocks: [] } }))
       ]);
-
-      console.log('API responses received:', {
-        dashboard: dashboardRes.data,
-        referralCode: referralRes.data.referralCode,
-        subscriptions: subscriptionsRes.data.subscriptions?.length,
-        continuableStocks: continuableRes.data.continuableStocks?.length
-      });
-
-      console.log('Continuable stocks:', continuableRes.data.continuableStocks);
-      console.log('Subscriptions:', subscriptionsRes.data.subscriptions?.map(s => ({ id: s.id, stockId: s.stockId, status: s.status, isActive: s.isActive, isExpired: s.isExpired })));
 
       setDashboard(dashboardRes.data.dashboard || { stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0, withdrawableBalance: 0 });
       setReferralCode(referralRes.data.referralCode);
@@ -115,7 +100,7 @@ export default function SubscriptionPanel() {
       // Get the user's referral code used from the current user object (not from initial mount)
       // The user object in AuthContext should have referralCodeUsed from the backend
     } catch (error) {
-      console.error('Error fetching subscription data:', error);
+      // Error fetching subscription data
       // Don't set fallback values - let the UI show empty state
       setDashboard({ stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0 });
       setReferralCode('');

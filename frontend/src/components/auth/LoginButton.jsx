@@ -11,6 +11,7 @@ function LoginButton() {
             src={user.picture}
             alt={user.displayName}
             className="w-8 h-8 rounded-full object-cover"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold bg-emerald-900 text-emerald-300">
