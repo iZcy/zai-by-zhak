@@ -199,7 +199,7 @@ export default function SubscriptionPanel() {
                     <p className="text-sm font-medium text-stone-200">{sub.stockId}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        sub.status === 'active' && sub.isActive
+                        sub.status === 'active' && sub.isActive && !sub.isExpired
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
                           : sub.status === 'pending'
                           ? 'bg-yellow-950 text-yellow-300 border border-yellow-900'
@@ -219,7 +219,7 @@ export default function SubscriptionPanel() {
                     <p className="text-xs text-stone-600">per month</p>
                   </div>
                 </div>
-                {sub.apiToken && (
+                {sub.apiToken && sub.isActive && !sub.isExpired && (
                   <div className="mt-3 p-3 rounded-lg bg-stone-900/50 border border-stone-800">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">

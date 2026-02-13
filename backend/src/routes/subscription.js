@@ -303,17 +303,25 @@ router.get('/my', authenticate, async (req, res) => {
 
     res.json({
       success: true,
-      subscriptions: subscriptions.map(sub => ({
-        id: sub._id,
-        stockId: sub.stockId,
-        status: sub.status,
-        isActive: sub.isActive,
-        activeUntil: sub.activeUntil,
-        monthlyFee: sub.monthlyFee,
-        apiToken: sub.apiToken,
-        hasApiToken: !!sub.apiToken,
-        paymentProof: sub.paymentProof
-      }))
+      subscriptions: subscriptions.map(sub => {
+        // Check if subscription is expired
+        const isExpired = sub.activeUntil && new Date(sub.activeUntil) < new Date();
+        // Only show API token for active, non-expired subscriptions
+        const showApiToken = sub.isActive && sub.status === 'active' && !isExpired;
+
+        return {
+          id: sub._id,
+          stockId: sub.stockId,
+          status: sub.status,
+          isActive: sub.isActive,
+          activeUntil: sub.activeUntil,
+          monthlyFee: sub.monthlyFee,
+          isExpired: isExpired,
+          apiToken: showApiToken ? sub.apiToken : null,
+          hasApiToken: !!sub.apiToken,
+          paymentProof: sub.paymentProof
+        };
+      })
     });
   } catch (error) {
     res.status(500).json({
