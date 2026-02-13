@@ -130,14 +130,10 @@ router.get('/google/callback', async (req, res) => {
 
     // Exchange code for access token
     // Get the actual callback URL from the request
-    const protocol = req.protocol;
+    // Check X-Forwarded-Proto header first (for reverse proxy like nginx)
+    const protocol = req.get('x-forwarded-proto') || req.protocol;
     const host = req.get('host');
     const callbackUrl = `${protocol}://${host}/api/auth/google/callback`;
-
-    console.log('🔍 OAuth Callback Debug:');
-    console.log('protocol:', protocol);
-    console.log('host:', host);
-    console.log('callbackUrl:', callbackUrl);
 
     const tokenResponse = await axios.post(GOOGLE_CONFIG.tokenURL, {
       code,
