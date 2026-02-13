@@ -17,6 +17,9 @@ export default function SubscriptionPanel() {
   const [referredByCode, setReferredByCode] = useState(null);
   const [stockFilter, setStockFilter] = useState('ongoing'); // 'ongoing', 'all'
   const [exchangeRate, setExchangeRate] = useState(null);
+  const [viewingPaymentProof, setViewingPaymentProof] = useState(null);
+  const [paymentProofUrl, setPaymentProofUrl] = useState(null);
+  const [cancellingSubscription, setCancellingSubscription] = useState(null);
   const { user } = useAuth();
   const toast = useToast();
 
@@ -147,6 +150,32 @@ export default function SubscriptionPanel() {
   const filteredSubscriptions = stockFilter === 'ongoing'
     ? subscriptions.filter(sub => (sub.isActive && !sub.isExpired) || sub.status === 'pending')
     : subscriptions;
+
+  const handleViewPaymentProof = async (sub) => {
+    if (!sub.paymentProof) return;
+    try {
+      const response = await api.get(`/subscription/payment-proof/${sub.id}`, {
+        responseType: 'blob'
+      });
+      const url = URL.createObjectURL(response.data);
+      setPaymentProofUrl(url);
+      setViewingPaymentProof(sub);
+    } catch (error) {
+      toast.showError('Failed to load payment proof');
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    if (!cancellingSubscription) return;
+    try {
+      await api.post(`/subscription/cancel/${cancellingSubscription.id}`);
+      toast.showSuccess('Subscription cancelled successfully');
+      setCancellingSubscription(null);
+      fetchData();
+    } catch (error) {
+      toast.showError(error.response?.data?.message || 'Failed to cancel subscription');
+    }
+  };
 
   if (loading) return <div className="text-stone-400">Loading...</div>;
 
@@ -298,6 +327,26 @@ export default function SubscriptionPanel() {
                         Copy
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {/* Pending subscription actions */}
+                {sub.status === 'pending' && (
+                  <div className="mt-3 flex gap-2">
+                    {sub.paymentProof && (
+                      <button
+                        onClick={() => handleViewPaymentProof(sub)}
+                        className="flex-1 h-8 px-3 rounded text-xs font-medium border border-stone-700 text-stone-300 hover:bg-stone-800"
+                      >
+                        View Receipt
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setCancellingSubscription(sub)}
+                      className="flex-1 h-8 px-3 rounded text-xs font-medium border border-red-900 text-red-400 hover:bg-red-950"
+                    >
+                      Cancel Request
+                    </button>
                   </div>
                 )}
               </div>
@@ -476,7 +525,7 @@ export default function SubscriptionPanel() {
               <div className="p-3 rounded-lg border border-stone-800 bg-black">
                 <p className="text-xs text-stone-400">Payment Instructions:</p>
                 <ul className="mt-2 space-y-1 text-xs text-stone-500">
-                  <li>1. Send $10 {exchangeRate ? `(Rp${Math.ceil((10 * exchangeRate) / 500) * 500).toLocaleString('id-ID')})` : ''} to:</li>
+                  <li>1. Send $10 {exchangeRate ? <span className="text-stone-300">(Rp{Math.ceil((10 * exchangeRate) / 500) * 500})</span> : ''} to:</li>
                   <li className="pl-4 text-stone-300 font-medium">BCA 7540249843</li>
                   <li className="pl-4 text-stone-300 font-medium">a.n. Yitzhak Edmund Tio Manalu</li>
                   <li>2. Upload screenshot of payment</li>
@@ -567,6 +616,77 @@ export default function SubscriptionPanel() {
                   Submit Request
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Payment Proof Modal */}
+      {viewingPaymentProof && paymentProofUrl && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-stone-100">Payment Receipt</h2>
+              <button
+                onClick={() => {
+                  setViewingPaymentProof(null);
+                  URL.revokeObjectURL(paymentProofUrl);
+                  setPaymentProofUrl(null);
+                }}
+                className="text-stone-500 hover:text-stone-300"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="rounded-lg overflow-hidden border border-stone-800">
+              <img
+                src={paymentProofUrl}
+                alt="Payment Proof"
+                className="w-full h-auto max-h-[60vh] object-contain"
+              />
+            </div>
+            <p className="text-xs text-stone-600 mt-3">
+              Stock ID: {viewingPaymentProof.stockId}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Subscription Modal */}
+      {cancellingSubscription && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-medium text-stone-100 mb-4">Cancel Subscription Request</h2>
+
+            <div className="space-y-4 mb-6">
+              <div className="p-4 rounded-lg border border-stone-800 bg-black">
+                <p className="text-xs text-stone-500">Stock ID</p>
+                <p className="text-sm text-stone-200 font-mono">{cancellingSubscription.stockId}</p>
+              </div>
+
+              <div className="p-3 rounded-lg border border-yellow-900/50 bg-yellow-950/20">
+                <div className="flex items-start gap-2">
+                  <iconify-icon icon="solar:danger-triangle-linear" width="16" className="text-yellow-500 mt-0.5"></iconify-icon>
+                  <p className="text-xs text-yellow-200/80">
+                    Are you sure you want to cancel this subscription request? This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancellingSubscription(null)}
+                className="flex-1 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+              >
+                Keep Request
+              </button>
+              <button
+                onClick={handleCancelSubscription}
+                className="flex-1 h-10 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700"
+              >
+                Cancel Request
+              </button>
             </div>
           </div>
         </div>

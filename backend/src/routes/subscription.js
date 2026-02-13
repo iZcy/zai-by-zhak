@@ -333,6 +333,95 @@ router.get('/my', authenticate, async (req, res) => {
   }
 });
 
+// User: Get payment proof for their subscription
+router.get('/payment-proof/:subscriptionId', authenticate, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const subscription = await Subscription.findById(subscriptionId);
+
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    // Verify ownership
+    if (subscription.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    if (!subscription.paymentProof) {
+      return res.status(404).json({
+        success: false,
+        message: 'No payment proof found'
+      });
+    }
+
+    const filePath = path.join(__dirname, '../../uploads/payment-proofs', subscription.paymentProof);
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// User: Cancel pending subscription
+router.post('/cancel/:subscriptionId', authenticate, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const subscription = await Subscription.findById(subscriptionId);
+
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    // Verify ownership
+    if (subscription.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    // Only allow cancelling pending subscriptions
+    if (subscription.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only pending subscriptions can be cancelled'
+      });
+    }
+
+    subscription.status = 'cancelled';
+    await subscription.save();
+
+    res.json({
+      success: true,
+      message: 'Subscription cancelled successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // Admin: Get all pending subscriptions
 router.get('/admin/subscriptions/pending', authenticate, requireAdmin, async (req, res) => {
   try {
