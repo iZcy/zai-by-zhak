@@ -476,7 +476,7 @@ export default function SubscriptionPanel() {
               <div className="p-3 rounded-lg border border-stone-800 bg-black">
                 <p className="text-xs text-stone-400">Payment Instructions:</p>
                 <ul className="mt-2 space-y-1 text-xs text-stone-500">
-                  <li>1. Send $10 {exchangeRate ? `(Rp${(10 * exchangeRate).toLocaleString('id-ID')})` : ''} to:</li>
+                  <li>1. Send $10 {exchangeRate ? `(Rp${Math.ceil((10 * exchangeRate) / 500) * 500).toLocaleString('id-ID')})` : ''} to:</li>
                   <li className="pl-4 text-stone-300 font-medium">BCA 7540249843</li>
                   <li className="pl-4 text-stone-300 font-medium">a.n. Yitzhak Edmund Tio Manalu</li>
                   <li>2. Upload screenshot of payment</li>
