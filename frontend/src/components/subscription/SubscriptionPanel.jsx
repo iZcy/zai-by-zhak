@@ -399,15 +399,18 @@ export default function SubscriptionPanel() {
           <h2 className="text-sm font-medium text-stone-100">Withdraw History</h2>
           <button
             onClick={() => setShowWithdrawModal(true)}
-            disabled={(dashboard?.withdrawableBalance || 0) < 2}
+            disabled={(dashboard?.withdrawableBalance || 0) < 2 || !dashboard?.hasActiveSubscription}
             className={`h-9 px-4 rounded-md text-xs font-medium ${
-              (dashboard?.withdrawableBalance || 0) < 2
+              (dashboard?.withdrawableBalance || 0) < 2 || !dashboard?.hasActiveSubscription
                 ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
             Request Withdraw
           </button>
+          {!dashboard?.hasActiveSubscription && (dashboard?.withdrawableBalance || 0) >= 2 && (
+            <p className="text-xs text-stone-600 mt-2">Requires active stock to withdraw</p>
+          )}
         </div>
 
         {withdrawHistory.length === 0 ? (
