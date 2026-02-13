@@ -28,6 +28,8 @@ export default function AdminSubscriptionPanel() {
   const [activeUntilTo, setActiveUntilTo] = useState('');
   const [expiredFilter, setExpiredFilter] = useState('all'); // 'all', 'yes', 'no'
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'enabled', 'disabled'
+  const [userFilter, setUserFilter] = useState('all'); // 'all', 'existing'
+  const [stockIdSearch, setStockIdSearch] = useState('');
 
   useEffect(() => {
     // Skip auth check in dev mode
@@ -225,6 +227,9 @@ export default function AdminSubscriptionPanel() {
     }
   };
 
+  // Get list of user IDs that have subscriptions (existing users)
+  const existingUserIds = [...new Set(activeSubscriptions.map(sub => sub.user?._id || sub.user?.id).filter(Boolean))];
+
   // Sort subscriptions: expired but enabled first, then by date
   const sortedSubscriptions = [...activeSubscriptions].sort((a, b) => {
     const aIsExpiredButEnabled = a.isActive && a.activeUntil && new Date(a.activeUntil) < new Date();
@@ -242,6 +247,18 @@ export default function AdminSubscriptionPanel() {
 
   // Filter subscriptions based on filter states
   const filteredSubscriptions = sortedSubscriptions.filter((sub) => {
+    // Filter by Stock ID search
+    if (stockIdSearch) {
+      const searchLower = stockIdSearch.toLowerCase();
+      if (!sub.stockId?.toLowerCase().includes(searchLower)) return false;
+    }
+
+    // Filter by User (existing users)
+    if (userFilter === 'existing') {
+      const userId = sub.user?._id || sub.user?.id;
+      if (!userId || !existingUserIds.includes(userId)) return false;
+    }
+
     // Filter by Active Until date range
     if (activeUntilFrom && sub.activeUntil) {
       const fromDate = new Date(activeUntilFrom);
@@ -276,9 +293,11 @@ export default function AdminSubscriptionPanel() {
     setActiveUntilTo('');
     setExpiredFilter('all');
     setStatusFilter('all');
+    setUserFilter('all');
+    setStockIdSearch('');
   };
 
-  const hasActiveFilters = activeUntilFrom || activeUntilTo || expiredFilter !== 'all' || statusFilter !== 'all';
+  const hasActiveFilters = activeUntilFrom || activeUntilTo || expiredFilter !== 'all' || statusFilter !== 'all' || userFilter !== 'all' || stockIdSearch;
 
   if (loading) return <div className="text-stone-400">Loading...</div>;
 
@@ -507,6 +526,31 @@ export default function AdminSubscriptionPanel() {
         {/* Filters */}
         <div className="mb-4 p-3 rounded-lg border border-stone-800 bg-stone-900/30">
           <div className="flex flex-wrap gap-4">
+            {/* Stock ID Search */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500">Stock ID:</label>
+              <input
+                type="text"
+                value={stockIdSearch}
+                onChange={(e) => setStockIdSearch(e.target.value)}
+                placeholder="Search..."
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700 w-32"
+              />
+            </div>
+
+            {/* User Filter */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-stone-500">User:</label>
+              <select
+                value={userFilter}
+                onChange={(e) => setUserFilter(e.target.value)}
+                className="px-2 py-1 text-xs bg-black border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-700"
+              >
+                <option value="all">All</option>
+                <option value="existing">Existing Users</option>
+              </select>
+            </div>
+
             {/* Active Until Date Range */}
             <div className="flex items-center gap-2">
               <label className="text-xs text-stone-500">Active Until:</label>
