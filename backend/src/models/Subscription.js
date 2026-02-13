@@ -14,7 +14,7 @@ const subscriptionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'active', 'expired', 'cancelled'],
+    enum: ['pending', 'active', 'expired', 'cancelled', 'rejected'],
     default: 'pending'
   },
   startDate: {
@@ -48,6 +48,18 @@ const subscriptionSchema = new mongoose.Schema({
   activeUntil: {
     type: Date,
     default: null
+  },
+  // Rejection tracking
+  rejectionReason: {
+    type: String,
+    default: null
+  },
+  // Continuation tracking
+  continuedFrom: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Subscription',
+    default: null,
+    index: true
   }
 }, {
   timestamps: true

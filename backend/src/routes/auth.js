@@ -83,7 +83,10 @@ router.post('/dev/login', async (req, res) => {
         displayName: user.displayName,
         role: user.role,
         referralCode: user.referralCode,
-        referralCodeUsed: user.referralCodeUsed
+        referralCodeUsed: user.referralCodeUsed,
+        whatsappNumber: user.whatsappNumber,
+        bankProvider: user.bankProvider,
+        bankNumber: user.bankNumber
       }
     });
   } catch (error) {
@@ -220,7 +223,10 @@ router.get('/me', optionalAuth, async (req, res) => {
         referralCodeUsed: req.user.referralCodeUsed,
         emailVerified: req.user.emailVerified,
         createdAt: req.user.createdAt,
-        lastLogin: req.user.lastLogin
+        lastLogin: req.user.lastLogin,
+        whatsappNumber: req.user.whatsappNumber,
+        bankProvider: req.user.bankProvider,
+        bankNumber: req.user.bankNumber
       }
     });
   } else {
@@ -316,7 +322,60 @@ router.get('/profile', authenticate, async (req, res) => {
         emailVerified: req.user.emailVerified,
         createdAt: req.user.createdAt,
         lastLogin: req.user.lastLogin,
-        isAdmin: req.user.role === 'admin'
+        isAdmin: req.user.role === 'admin',
+        whatsappNumber: req.user.whatsappNumber,
+        bankProvider: req.user.bankProvider,
+        bankNumber: req.user.bankNumber
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Update user account info
+router.put('/profile', authenticate, async (req, res) => {
+  try {
+    const { displayName, whatsappNumber, bankProvider, bankNumber } = req.body;
+
+    const user = req.user;
+
+    if (displayName !== undefined) {
+      user.displayName = displayName;
+    }
+    if (whatsappNumber !== undefined) {
+      user.whatsappNumber = whatsappNumber || null;
+    }
+    if (bankProvider !== undefined) {
+      user.bankProvider = bankProvider || null;
+    }
+    if (bankNumber !== undefined) {
+      user.bankNumber = bankNumber || null;
+    }
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        displayName: user.displayName,
+        picture: user.picture,
+        role: user.role,
+        emailVerified: user.emailVerified,
+        createdAt: user.createdAt,
+        lastLogin: user.lastLogin,
+        isAdmin: user.role === 'admin',
+        whatsappNumber: user.whatsappNumber,
+        bankProvider: user.bankProvider,
+        bankNumber: user.bankNumber
       }
     });
   } catch (error) {

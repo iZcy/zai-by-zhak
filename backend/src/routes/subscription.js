@@ -232,6 +232,57 @@ router.get('/referral/active', authenticate, async (req, res) => {
   }
 });
 
+// Get continuable stocks (stocks that can be continued)
+router.get('/continuable', authenticate, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Get all stocks that have an activeUntil date (meaning they were once active)
+    // and are either still active or expired
+    const candidateStocks = await Subscription.find({
+      userId,
+      status: { $in: ['active', 'expired'] },
+      activeUntil: { $ne: null }
+    }).sort({ activeUntil: -1 });
+
+    // Filter out stocks that already have a pending continuation
+    const continuableStocks = [];
+    for (const stock of candidateStocks) {
+      // Check if there's already a pending continuation request for this stock
+      const pendingContinuation = await Subscription.findOne({
+        continuedFrom: stock._id,
+        status: 'pending'
+      });
+
+      if (!pendingContinuation) {
+        // Calculate what the new expiry would be
+        const currentExpiry = new Date(stock.activeUntil);
+        const newExpiry = new Date(currentExpiry);
+        newExpiry.setDate(newExpiry.getDate() + 30);
+
+        continuableStocks.push({
+          id: stock._id,
+          stockId: stock.stockId,
+          currentExpiry: stock.activeUntil,
+          newExpiry: newExpiry,
+          isExpired: new Date() > currentExpiry,
+          isActive: stock.isActive && stock.status === 'active' && new Date() <= currentExpiry
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      continuableStocks
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // Create subscription request (buy stock)
 router.post('/request', authenticate, upload.single('paymentProof'), async (req, res) => {
   try {
@@ -241,6 +292,24 @@ router.post('/request', authenticate, upload.single('paymentProof'), async (req,
       return res.status(400).json({
         success: false,
         message: 'Payment proof is required'
+      });
+    }
+
+    // Check daily limit (max 3 requests per day)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const dailyRequests = await Subscription.countDocuments({
+      userId,
+      createdAt: { $gte: today, $lt: tomorrow }
+    });
+
+    if (dailyRequests >= 3) {
+      return res.status(429).json({
+        success: false,
+        message: 'Daily limit reached. You can only submit 3 stock requests per day.'
       });
     }
 
@@ -297,10 +366,112 @@ router.post('/request', authenticate, upload.single('paymentProof'), async (req,
   }
 });
 
+// Continue stock (create continuation request)
+router.post('/continue/:stockId', authenticate, upload.single('paymentProof'), async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { stockId } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment proof is required'
+      });
+    }
+
+    // Find the original stock to continue
+    const originalStock = await Subscription.findOne({
+      _id: stockId,
+      userId,
+      status: { $in: ['active', 'expired'] }
+    });
+
+    if (!originalStock) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stock not found or cannot be continued'
+      });
+    }
+
+    // Check if there's already a pending continuation for this stock
+    const existingContinuation = await Subscription.findOne({
+      continuedFrom: originalStock._id,
+      status: 'pending'
+    });
+
+    if (existingContinuation) {
+      return res.status(400).json({
+        success: false,
+        message: 'There is already a pending continuation for this stock'
+      });
+    }
+
+    // Generate new stock ID
+    const generateStockId = () => {
+      const timestamp = Date.now().toString(36).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+      return `STOCK-${timestamp}-${random}`;
+    };
+
+    let newStockId;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    do {
+      newStockId = generateStockId();
+      const existing = await Subscription.findOne({ stockId: newStockId });
+      if (!existing) break;
+      attempts++;
+    } while (attempts < maxAttempts);
+
+    if (attempts >= maxAttempts) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate unique stock ID'
+      });
+    }
+
+    // Calculate new activeUntil: original's activeUntil + 30 days
+    const originalExpiry = new Date(originalStock.activeUntil);
+    const newActiveUntil = new Date(originalExpiry);
+    newActiveUntil.setDate(newActiveUntil.getDate() + 30);
+
+    // Create continuation subscription with pending status
+    const subscription = await Subscription.create({
+      userId,
+      stockId: newStockId,
+      status: 'pending',
+      paymentProof: `/uploads/payment-proofs/${req.file.filename}`,
+      monthlyFee: 10,
+      continuedFrom: originalStock._id,
+      // Pre-calculate activeUntil for reference (will be used on approval)
+      activeUntil: newActiveUntil
+    });
+
+    res.json({
+      success: true,
+      message: 'Continuation request created. Please wait for admin approval.',
+      subscription: {
+        id: subscription._id,
+        stockId: subscription.stockId,
+        status: subscription.status,
+        continuedFrom: originalStock.stockId,
+        newActiveUntil: newActiveUntil
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // Get user's subscriptions
 router.get('/my', authenticate, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ userId: req.user._id })
+      .populate('continuedFrom', 'stockId activeUntil')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -321,7 +492,17 @@ router.get('/my', authenticate, async (req, res) => {
           isExpired: isExpired,
           apiToken: showApiToken ? sub.apiToken : null,
           hasApiToken: !!sub.apiToken,
-          paymentProof: sub.paymentProof
+          paymentProof: sub.paymentProof,
+          rejectionReason: sub.rejectionReason,
+          rejectedAt: sub.status === 'rejected' || sub.status === 'cancelled' ? sub.updatedAt : null,
+          createdAt: sub.createdAt,
+          updatedAt: sub.updatedAt,
+          isContinuation: !!sub.continuedFrom,
+          continuedFrom: sub.continuedFrom ? {
+            id: sub.continuedFrom._id,
+            stockId: sub.continuedFrom.stockId,
+            activeUntil: sub.continuedFrom.activeUntil
+          } : null
         };
       })
     });
@@ -361,7 +542,13 @@ router.get('/payment-proof/:subscriptionId', authenticate, async (req, res) => {
       });
     }
 
-    const filePath = path.join(__dirname, '../../uploads/payment-proofs', subscription.paymentProof);
+    // paymentProof is stored as "/uploads/payment-proofs/filename" or just "filename"
+    let filename = subscription.paymentProof;
+    if (filename.startsWith('/uploads/payment-proofs/')) {
+      filename = filename.replace('/uploads/payment-proofs/', '');
+    }
+
+    const filePath = path.join(__dirname, '../../uploads/payment-proofs', filename);
     if (fs.existsSync(filePath)) {
       res.sendFile(filePath);
     } else {
@@ -426,7 +613,8 @@ router.post('/cancel/:subscriptionId', authenticate, async (req, res) => {
 router.get('/admin/subscriptions/pending', authenticate, requireAdmin, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({ status: 'pending' })
-      .populate('userId', 'email displayName')
+      .populate('userId', 'email displayName whatsappNumber bankProvider bankNumber')
+      .populate('continuedFrom', 'stockId activeUntil')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -436,7 +624,15 @@ router.get('/admin/subscriptions/pending', authenticate, requireAdmin, async (re
         user: sub.userId,
         stockId: sub.stockId,
         paymentProof: sub.paymentProof,
-        requestedAt: sub.createdAt
+        requestedAt: sub.createdAt,
+        isContinuation: !!sub.continuedFrom,
+        continuedFrom: sub.continuedFrom ? {
+          id: sub.continuedFrom._id,
+          stockId: sub.continuedFrom.stockId,
+          activeUntil: sub.continuedFrom.activeUntil
+        } : null,
+        // For continuations, show the pre-calculated new expiry
+        newActiveUntil: sub.activeUntil
       }))
     });
   } catch (error) {
@@ -475,11 +671,11 @@ router.get('/admin/subscriptions/active', authenticate, requireAdmin, async (req
   }
 });
 
-// Admin: Get all subscriptions (including disabled/cancelled)
+// Admin: Get all subscriptions (including disabled/cancelled/rejected)
 router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, res) => {
   try {
     const subscriptions = await Subscription.find({
-      status: { $in: ['active', 'cancelled'] }
+      status: { $in: ['active', 'cancelled', 'rejected', 'expired'] }
     })
       .populate('userId', 'email displayName')
       .sort({ updatedAt: -1 });
@@ -496,7 +692,8 @@ router.get('/admin/subscriptions/all', authenticate, requireAdmin, async (req, r
         isActive: sub.isActive,
         status: sub.status,
         paymentProof: sub.paymentProof,
-        isActivelyPaying: sub.isActivelyPaying()
+        isActivelyPaying: sub.isActivelyPaying(),
+        rejectionReason: sub.rejectionReason
       }))
     });
   } catch (error) {
@@ -513,7 +710,7 @@ router.get('/admin/users/stats', authenticate, requireAdmin, async (req, res) =>
     // Get all users with subscriptions
     const usersWithSubs = await Subscription.distinct('userId');
     const users = await User.find({ _id: { $in: usersWithSubs } })
-      .select('email displayName role')
+      .select('email displayName role withdrawableBalance')
       .sort({ email: 1 });
 
     const usersStats = await Promise.all(users.map(async (user) => {
@@ -603,7 +800,8 @@ router.post('/admin/subscriptions/:subscriptionId/approve', authenticate, requir
       });
     }
 
-    const subscription = await Subscription.findById(subscriptionId);
+    const subscription = await Subscription.findById(subscriptionId)
+      .populate('continuedFrom', 'stockId activeUntil');
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -611,9 +809,18 @@ router.post('/admin/subscriptions/:subscriptionId/approve', authenticate, requir
       });
     }
 
-    // Set active for 30 days
-    const activeUntil = new Date();
-    activeUntil.setDate(activeUntil.getDate() + 30);
+    // Determine activeUntil based on whether this is a continuation
+    let activeUntil;
+    let isContinuation = !!subscription.continuedFrom;
+
+    if (isContinuation && subscription.activeUntil) {
+      // For continuations, use the pre-calculated activeUntil (original + 30 days)
+      activeUntil = subscription.activeUntil;
+    } else {
+      // For new subscriptions, set active for 30 days from now
+      activeUntil = new Date();
+      activeUntil.setDate(activeUntil.getDate() + 30);
+    }
 
     subscription.status = 'active';
     subscription.isActive = true;
@@ -638,13 +845,19 @@ router.post('/admin/subscriptions/:subscriptionId/approve', authenticate, requir
       }
     }
 
+    const message = isContinuation
+      ? 'Continuation approved and activated'
+      : 'Subscription approved and activated for 30 days';
+
     res.json({
       success: true,
-      message: 'Subscription approved and activated for 30 days',
+      message,
       subscription: {
         stockId: subscription.stockId,
         activeUntil: subscription.activeUntil,
-        apiToken: subscription.apiToken
+        apiToken: subscription.apiToken,
+        isContinuation,
+        continuedFrom: subscription.continuedFrom ? subscription.continuedFrom.stockId : null
       }
     });
   } catch (error) {
@@ -669,13 +882,14 @@ router.post('/admin/subscriptions/:subscriptionId/reject', authenticate, require
       });
     }
 
-    subscription.status = 'cancelled';
+    subscription.status = 'rejected';
     subscription.isActive = false;
+    subscription.rejectionReason = reason || null;
     await subscription.save();
 
     res.json({
       success: true,
-      message: reason || 'Subscription rejected'
+      message: 'Subscription rejected'
     });
   } catch (error) {
     res.status(500).json({
@@ -1080,7 +1294,7 @@ router.post('/withdraw/request', authenticate, async (req, res) => {
 router.get('/admin/withdraw/requests', authenticate, requireAdmin, async (req, res) => {
   try {
     const withdraws = await Withdraw.find()
-      .populate('userId', 'email displayName')
+      .populate('userId', 'email displayName whatsappNumber bankProvider bankNumber')
       .sort({ createdAt: -1 });
 
     res.json({

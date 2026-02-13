@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import Pagination from './Pagination';
 
 export default function SubscriptionPanel() {
   const [dashboard, setDashboard] = useState(null);
@@ -15,13 +16,39 @@ export default function SubscriptionPanel() {
   const [paymentProof, setPaymentProof] = useState(null);
   const [loading, setLoading] = useState(true);
   const [referredByCode, setReferredByCode] = useState(null);
-  const [stockFilter, setStockFilter] = useState('ongoing'); // 'ongoing', 'all'
+  const [stockFilter, setStockFilter] = useState('ongoing'); // 'ongoing', 'all', 'rejected'
   const [exchangeRate, setExchangeRate] = useState(null);
   const [viewingPaymentProof, setViewingPaymentProof] = useState(null);
   const [paymentProofUrl, setPaymentProofUrl] = useState(null);
   const [cancellingSubscription, setCancellingSubscription] = useState(null);
-  const { user } = useAuth();
+  // Continue Stock states
+  const [showContinueModal, setShowContinueModal] = useState(false);
+  const [continuableStocks, setContinuableStocks] = useState([]);
+  const [selectedStockToContinue, setSelectedStockToContinue] = useState(null);
+  const [continuePaymentProof, setContinuePaymentProof] = useState(null);
+  // Account Info states
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [accountForm, setAccountForm] = useState({
+    displayName: '',
+    whatsappNumber: '',
+    bankProvider: '',
+    bankNumber: ''
+  });
+  // Random transaction suffix (generated once on mount)
+  const [transactionSuffix] = useState(() => Math.floor(Math.random() * 900) + 100); // 100-999
+  // Pagination states
+  const ITEMS_PER_PAGE = 5;
+  const [stocksPage, setStocksPage] = useState(1);
+  const [referralsPage, setReferralsPage] = useState(1);
+  const { user, refreshUser } = useAuth();
   const toast = useToast();
+
+  // Helper function to format IDR price with random suffix
+  const formatIdrPrice = (usdAmount) => {
+    if (!exchangeRate) return null;
+    const baseIdr = Math.floor((usdAmount * exchangeRate) / 1000) * 1000; // Round down to nearest 1000
+    return baseIdr + transactionSuffix; // Add random 3 digits
+  };
 
   useEffect(() => {
     if (user) {
@@ -59,25 +86,31 @@ export default function SubscriptionPanel() {
   const fetchData = async () => {
     console.log('fetchData called, user:', user?.email);
     try {
-      const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes, withdrawRes] = await Promise.all([
+      const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes, withdrawRes, continuableRes] = await Promise.all([
         api.get('/subscription/dashboard'),
         api.get('/subscription/referral/code'),
         api.get('/subscription/my'),
         api.get('/subscription/referral/active'),
-        api.get('/subscription/withdraw/history').catch(() => ({ data: { withdraws: [] } }))
+        api.get('/subscription/withdraw/history').catch(() => ({ data: { withdraws: [] } })),
+        api.get('/subscription/continuable').catch(() => ({ data: { continuableStocks: [] } }))
       ]);
 
       console.log('API responses received:', {
         dashboard: dashboardRes.data,
         referralCode: referralRes.data.referralCode,
-        subscriptions: subscriptionsRes.data.subscriptions?.length
+        subscriptions: subscriptionsRes.data.subscriptions?.length,
+        continuableStocks: continuableRes.data.continuableStocks?.length
       });
+
+      console.log('Continuable stocks:', continuableRes.data.continuableStocks);
+      console.log('Subscriptions:', subscriptionsRes.data.subscriptions?.map(s => ({ id: s.id, stockId: s.stockId, status: s.status, isActive: s.isActive, isExpired: s.isExpired })));
 
       setDashboard(dashboardRes.data.dashboard || { stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0, withdrawableBalance: 0 });
       setReferralCode(referralRes.data.referralCode);
       setSubscriptions(subscriptionsRes.data.subscriptions || []);
       setActiveReferrals(activeReferralsRes.data.activeReferrals || []);
       setWithdrawHistory(withdrawRes.data.withdraws || []);
+      setContinuableStocks(continuableRes.data.continuableStocks || []);
 
       // Get the user's referral code used from the current user object (not from initial mount)
       // The user object in AuthContext should have referralCodeUsed from the backend
@@ -89,6 +122,7 @@ export default function SubscriptionPanel() {
       setSubscriptions([]);
       setActiveReferrals([]);
       setReferredByCode(null);
+      setContinuableStocks([]);
     } finally {
       setLoading(false);
     }
@@ -142,14 +176,67 @@ export default function SubscriptionPanel() {
     }
   };
 
+  const handleContinueStock = async (e) => {
+    e.preventDefault();
+
+    if (!selectedStockToContinue) {
+      toast.showError('Please select a stock to continue');
+      return;
+    }
+
+    if (!continuePaymentProof) {
+      toast.showError('Please provide payment proof');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('paymentProof', continuePaymentProof);
+
+    try {
+      const response = await api.post(`/subscription/continue/${selectedStockToContinue.id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      toast.showSuccess('Continuation request submitted! Wait for admin approval.');
+      setShowContinueModal(false);
+      setSelectedStockToContinue(null);
+      setContinuePaymentProof(null);
+      fetchData();
+    } catch (error) {
+      toast.showError(error.response?.data?.message || 'Failed to submit continuation request');
+    }
+  };
+
   // Check if user has pending stocks
   const hasPendingStocks = subscriptions.some(sub => sub.status === 'pending');
 
   // Filter subscriptions based on stockFilter
   // "ongoing" shows both active and pending stocks
+  // "rejected" shows rejected and cancelled stocks (cancelled was old rejection status)
+  // "all" shows everything
   const filteredSubscriptions = stockFilter === 'ongoing'
     ? subscriptions.filter(sub => (sub.isActive && !sub.isExpired) || sub.status === 'pending')
+    : stockFilter === 'rejected'
+    ? subscriptions.filter(sub => sub.status === 'rejected' || sub.status === 'cancelled')
     : subscriptions;
+
+  // Pagination calculations
+  const stocksTotalPages = Math.ceil(filteredSubscriptions.length / ITEMS_PER_PAGE);
+  const paginatedSubscriptions = filteredSubscriptions.slice(
+    (stocksPage - 1) * ITEMS_PER_PAGE,
+    stocksPage * ITEMS_PER_PAGE
+  );
+
+  const referralsTotalPages = Math.ceil(activeReferrals.length / ITEMS_PER_PAGE);
+  const paginatedReferrals = activeReferrals.slice(
+    (referralsPage - 1) * ITEMS_PER_PAGE,
+    referralsPage * ITEMS_PER_PAGE
+  );
+
+  // Reset pagination when filter changes
+  useEffect(() => {
+    setStocksPage(1);
+  }, [stockFilter]);
 
   const handleViewPaymentProof = async (sub) => {
     if (!sub.paymentProof) return;
@@ -174,6 +261,36 @@ export default function SubscriptionPanel() {
       fetchData();
     } catch (error) {
       toast.showError(error.response?.data?.message || 'Failed to cancel subscription');
+    }
+  };
+
+  // Account Info handlers
+  const handleOpenAccountModal = async () => {
+    try {
+      const response = await api.get('/auth/profile');
+      const profile = response.data.user;
+      setAccountForm({
+        displayName: profile.displayName || '',
+        whatsappNumber: profile.whatsappNumber || '',
+        bankProvider: profile.bankProvider || '',
+        bankNumber: profile.bankNumber || ''
+      });
+      setShowAccountModal(true);
+    } catch (error) {
+      toast.showError('Failed to load profile');
+    }
+  };
+
+  const handleUpdateAccount = async (e) => {
+    e.preventDefault();
+    try {
+      await api.put('/auth/profile', accountForm);
+      toast.showSuccess('Account info updated successfully!');
+      setShowAccountModal(false);
+      await refreshUser();
+      fetchData();
+    } catch (error) {
+      toast.showError(error.response?.data?.message || 'Failed to update account');
     }
   };
 
@@ -232,22 +349,66 @@ export default function SubscriptionPanel() {
         </div>
       </div>
 
+      {/* Account Info */}
+      <div className="p-6 rounded-xl border border-stone-800 bg-black">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-stone-100">Account Info</h2>
+          <button
+            onClick={handleOpenAccountModal}
+            className="h-9 px-4 rounded-md text-xs font-medium border border-stone-700 text-stone-300 hover:bg-stone-900"
+          >
+            Edit
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="p-4 rounded-lg border border-stone-800 bg-black">
+            <p className="text-xs text-stone-500">Email</p>
+            <p className="text-sm text-stone-300 mt-1">{user?.email}</p>
+            <p className="text-xs text-stone-600 mt-1">Cannot be changed</p>
+          </div>
+
+          <div className="p-4 rounded-lg border border-stone-800 bg-black">
+            <p className="text-xs text-stone-500">Display Name</p>
+            <p className="text-sm text-stone-300 mt-1">{user?.displayName || '-'}</p>
+          </div>
+
+          <div className="p-4 rounded-lg border border-stone-800 bg-black">
+            <p className="text-xs text-stone-500">WhatsApp Number</p>
+            <p className="text-sm text-stone-300 mt-1">{user?.whatsappNumber || '-'}</p>
+            <p className="text-xs text-stone-600 mt-1">e.g. 62825252525</p>
+          </div>
+
+          <div className="p-4 rounded-lg border border-stone-800 bg-black">
+            <p className="text-xs text-stone-500">Bank Info</p>
+            <p className="text-sm text-stone-300 mt-1">
+              {user?.bankProvider || user?.bankNumber
+                ? `${user?.bankProvider || ''} ${user?.bankNumber ? '- ' + user.bankNumber : ''}`
+                : '-'}
+            </p>
+            <p className="text-xs text-stone-600 mt-1">e.g. BCA - 7540249843</p>
+          </div>
+        </div>
+      </div>
+
       {/* My Stocks */}
       <div className="p-6 rounded-xl border border-stone-800 bg-black">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-medium text-stone-100">My Stocks</h2>
-          <button
-            onClick={() => setShowBuyModal(true)}
-            disabled={dashboard?.hasActiveSubscription || hasPendingStocks}
-            className={`h-9 px-4 rounded-md text-xs font-medium ${
-              dashboard?.hasActiveSubscription || hasPendingStocks
-                ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                : 'bg-emerald-600 text-white hover:bg-emerald-700'
-            }`}
-          >
-            {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : hasPendingStocks ? 'Pending Request' : 'Buy Stock'}
-          </button>
-          <div className="flex items-center gap-2 ml-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-medium text-stone-100">My Stocks</h2>
+            <button
+              onClick={() => setShowBuyModal(true)}
+              disabled={dashboard?.hasActiveSubscription || hasPendingStocks}
+              className={`h-7 px-3 rounded-md text-xs font-medium ${
+                dashboard?.hasActiveSubscription || hasPendingStocks
+                  ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              }`}
+            >
+              {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : hasPendingStocks ? 'Pending Request' : 'Buy Stock'}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setStockFilter('ongoing')}
               className={`px-2 py-1 rounded text-xs font-medium ${
@@ -257,6 +418,16 @@ export default function SubscriptionPanel() {
               }`}
             >
               Ongoing
+            </button>
+            <button
+              onClick={() => setStockFilter('rejected')}
+              className={`px-2 py-1 rounded text-xs font-medium ${
+                stockFilter === 'rejected'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-stone-800 text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              Rejected
             </button>
             <button
               onClick={() => setStockFilter('all')}
@@ -274,15 +445,17 @@ export default function SubscriptionPanel() {
         {filteredSubscriptions.length === 0 ? (
           <div className="text-center py-12">
             <iconify-icon icon="solar:box-linear" width="48" className="mx-auto text-stone-800 mb-4"></iconify-icon>
-            <p className="text-stone-500 mb-2">{stockFilter === 'ongoing' ? 'No ongoing stocks' : 'No stocks yet'}</p>
+            <p className="text-stone-500 mb-2">
+              {stockFilter === 'ongoing' ? 'No ongoing stocks' : stockFilter === 'rejected' ? 'No rejected stocks' : 'No stocks yet'}
+            </p>
             <p className="text-xs text-stone-600">
-              {stockFilter === 'ongoing' ? 'No active or pending stocks' : 'Buy your first stock to access API'}
+              {stockFilter === 'ongoing' ? 'No active or pending stocks' : stockFilter === 'rejected' ? 'Rejected requests will appear here' : 'Buy your first stock to access API'}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredSubscriptions.map((sub) => (
-              <div key={sub.id} className="p-4 rounded-lg border border-stone-800 bg-black">
+            {paginatedSubscriptions.map((sub) => (
+              <div key={sub.id} className={`p-4 rounded-lg border bg-black ${sub.status === 'rejected' ? 'border-red-900/50' : 'border-stone-800'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium text-stone-200">{sub.stockId}</p>
@@ -292,13 +465,21 @@ export default function SubscriptionPanel() {
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
                           : sub.status === 'pending'
                           ? 'bg-yellow-950 text-yellow-300 border border-yellow-900'
+                          : sub.status === 'rejected' || sub.status === 'cancelled'
+                          ? 'bg-red-950 text-red-300 border border-red-900'
                           : 'bg-stone-900 text-stone-400 border border-stone-800'
                       }`}>
-                        {sub.status}
+                        {sub.status === 'cancelled' ? 'Rejected' : sub.status.charAt(0).toUpperCase() + sub.status.slice(1)}
                       </span>
                       {sub.activeUntil && (
                         <span className="text-xs text-stone-600">
                           Until: {new Date(sub.activeUntil).toLocaleDateString()}
+                        </span>
+                      )}
+                      {sub.isContinuation && sub.continuedFrom && (
+                        <span className="text-xs text-blue-400 flex items-center gap-1">
+                          <iconify-icon icon="solar:refresh-linear" width="12"></iconify-icon>
+                          Continued from {sub.continuedFrom.stockId}
                         </span>
                       )}
                     </div>
@@ -308,6 +489,27 @@ export default function SubscriptionPanel() {
                     <p className="text-xs text-stone-600">per month</p>
                   </div>
                 </div>
+
+                {/* Rejection Reason */}
+                {(sub.status === 'rejected' || sub.status === 'cancelled') && (
+                  <div className="mt-3 p-3 rounded-lg bg-red-950/20 border border-red-900/50">
+                    <div className="flex items-start gap-2">
+                      <iconify-icon icon="solar:info-circle-linear" width="16" className="text-red-400 mt-0.5 flex-shrink-0"></iconify-icon>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-red-400 font-medium">Rejection Reason</p>
+                          {sub.rejectedAt && (
+                            <p className="text-xs text-stone-500">
+                              {new Date(sub.rejectedAt).toLocaleDateString()} {new Date(sub.rejectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-sm text-stone-300 mt-1">{sub.rejectionReason || 'No reason provided'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {sub.apiToken && sub.isActive && !sub.isExpired && (
                   <div className="mt-3 p-3 rounded-lg bg-stone-900/50 border border-stone-800">
                     <div className="flex items-center justify-between">
@@ -330,29 +532,80 @@ export default function SubscriptionPanel() {
                   </div>
                 )}
 
-                {/* Pending subscription actions */}
-                {sub.status === 'pending' && (
+                {/* View Receipt button for all stocks with payment proof */}
+                {sub.paymentProof && (
                   <div className="mt-3 flex gap-2">
-                    {sub.paymentProof && (
+                    <button
+                      onClick={() => handleViewPaymentProof(sub)}
+                      className="flex-1 h-8 px-3 rounded text-xs font-medium border border-stone-700 text-stone-300 hover:bg-stone-800"
+                    >
+                      View Receipt
+                    </button>
+                    {/* Cancel button only for pending subscriptions */}
+                    {sub.status === 'pending' && (
                       <button
-                        onClick={() => handleViewPaymentProof(sub)}
-                        className="flex-1 h-8 px-3 rounded text-xs font-medium border border-stone-700 text-stone-300 hover:bg-stone-800"
+                        onClick={() => setCancellingSubscription(sub)}
+                        className="flex-1 h-8 px-3 rounded text-xs font-medium border border-red-900 text-red-400 hover:bg-red-950"
                       >
-                        View Receipt
+                        Cancel Request
                       </button>
                     )}
-                    <button
-                      onClick={() => setCancellingSubscription(sub)}
-                      className="flex-1 h-8 px-3 rounded text-xs font-medium border border-red-900 text-red-400 hover:bg-red-950"
-                    >
-                      Cancel Request
-                    </button>
+                    {/* Continue Stock button for active (non-expired) stocks only */}
+                    {(() => {
+                      const continuableStock = continuableStocks.find(s => String(s.id) === String(sub.id));
+                      const isActiveAndNotExpired = sub.status === 'active' && sub.isActive && !sub.isExpired;
+                      if (continuableStock && isActiveAndNotExpired && !hasPendingStocks) {
+                        return (
+                          <button
+                            onClick={() => {
+                              setSelectedStockToContinue(continuableStock);
+                              setShowContinueModal(true);
+                            }}
+                            className="flex-1 h-8 px-3 rounded text-xs font-medium border border-blue-700 text-blue-400 hover:bg-blue-950 flex items-center justify-center gap-1"
+                          >
+                            <iconify-icon icon="solar:refresh-linear" width="14"></iconify-icon>
+                            Continue
+                          </button>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 )}
+
+                {/* Continue Stock button for active stocks without payment proof */}
+                {!sub.paymentProof && (() => {
+                  const continuableStock = continuableStocks.find(s => String(s.id) === String(sub.id));
+                  const isActiveAndNotExpired = sub.status === 'active' && sub.isActive && !sub.isExpired;
+                  if (continuableStock && isActiveAndNotExpired && !hasPendingStocks) {
+                    return (
+                      <div className="mt-3">
+                        <button
+                          onClick={() => {
+                            setSelectedStockToContinue(continuableStock);
+                            setShowContinueModal(true);
+                          }}
+                          className="w-full h-8 px-3 rounded text-xs font-medium border border-blue-700 text-blue-400 hover:bg-blue-950 flex items-center justify-center gap-1"
+                        >
+                          <iconify-icon icon="solar:refresh-linear" width="14"></iconify-icon>
+                          Continue Stock
+                        </button>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             ))}
           </div>
         )}
+        <Pagination
+          currentPage={stocksPage}
+          totalPages={stocksTotalPages}
+          totalItems={filteredSubscriptions.length}
+          itemsPerPage={ITEMS_PER_PAGE}
+          onPageChange={setStocksPage}
+        />
       </div>
 
       {/* Referral Program */}
@@ -424,7 +677,7 @@ export default function SubscriptionPanel() {
           <h2 className="text-sm font-medium text-stone-100 mb-4">Active Referrals ({activeReferrals.length})</h2>
 
           <div className="space-y-3">
-            {activeReferrals.map((referral, index) => (
+            {paginatedReferrals.map((referral, index) => (
               <div key={index} className="p-4 rounded-lg border border-stone-800 bg-black">
                 <div className="flex items-center justify-between">
                   <div>
@@ -439,6 +692,13 @@ export default function SubscriptionPanel() {
               </div>
             ))}
           </div>
+          <Pagination
+            currentPage={referralsPage}
+            totalPages={referralsTotalPages}
+            totalItems={activeReferrals.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setReferralsPage}
+          />
         </div>
       )}
 
@@ -508,7 +768,24 @@ export default function SubscriptionPanel() {
       {showBuyModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
           <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-medium text-stone-100 mb-4">Buy Stock - $10/month</h2>
+            <h2 className="text-lg font-medium text-stone-100">Buy Stock</h2>
+
+            {/* Price Display */}
+            <div className="mt-4 mb-6 p-4 rounded-lg border border-emerald-900/50 bg-emerald-950/20 text-center">
+              <p className="text-3xl font-bold text-emerald-400">$10</p>
+              <p className="text-sm text-stone-400 mt-1">per month</p>
+              {exchangeRate && (
+                <p className="text-lg font-semibold text-stone-300 mt-2">
+                  Rp{formatIdrPrice(10)?.toLocaleString()}
+                </p>
+              )}
+            </div>
+
+            {exchangeRate && (
+              <p className="text-xs text-stone-600 mb-4 text-center">
+                * IDR rate is dynamic based on global currency rate. Last 3 digits are unique transaction code.
+              </p>
+            )}
 
             <form onSubmit={handleBuySubscription} className="space-y-4">
               <div>
@@ -525,18 +802,13 @@ export default function SubscriptionPanel() {
               <div className="p-3 rounded-lg border border-stone-800 bg-black">
                 <p className="text-xs text-stone-400">Payment Instructions:</p>
                 <ul className="mt-2 space-y-1 text-xs text-stone-500">
-                  <li>1. Send $10 {exchangeRate ? <span className="text-stone-300">(Rp{Math.ceil((10 * exchangeRate) / 500) * 500})</span> : ''} to:</li>
+                  <li>1. Send payment to:</li>
                   <li className="pl-4 text-stone-300 font-medium">BCA 7540249843</li>
                   <li className="pl-4 text-stone-300 font-medium">a.n. Yitzhak Edmund Tio Manalu</li>
                   <li>2. Upload screenshot of payment</li>
                   <li>3. Stock ID will be auto-generated</li>
                   <li>4. Wait for admin approval</li>
                 </ul>
-                {exchangeRate && (
-                  <p className="mt-2 text-[10px] text-stone-600">
-                    * IDR rate is dynamic based on global currency rate
-                  </p>
-                )}
               </div>
 
               <div className="flex gap-3">
@@ -688,6 +960,203 @@ export default function SubscriptionPanel() {
                 Cancel Request
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Continue Stock Modal */}
+      {showContinueModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-medium text-stone-100 mb-4">Continue Stock - $10/month</h2>
+
+            <form onSubmit={handleContinueStock} className="space-y-4">
+              {/* Stock Selection */}
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-2">Select Stock to Continue</label>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {continuableStocks.map((stock) => (
+                    <div
+                      key={stock.id}
+                      onClick={() => setSelectedStockToContinue(stock)}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selectedStockToContinue?.id === stock.id
+                          ? 'border-blue-500 bg-blue-950/30'
+                          : 'border-stone-800 hover:border-stone-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-stone-200">{stock.stockId}</p>
+                          <p className="text-xs text-stone-500">
+                            Current expiry: {new Date(stock.currentExpiry).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          {stock.isExpired ? (
+                            <span className="text-xs px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-900">
+                              Expired
+                            </span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-900">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Show new calculated expiry */}
+              {selectedStockToContinue && (
+                <div className="p-3 rounded-lg border border-blue-900/50 bg-blue-950/20">
+                  <div className="flex items-start gap-2">
+                    <iconify-icon icon="solar:calendar-linear" width="16" className="text-blue-400 mt-0.5"></iconify-icon>
+                    <div>
+                      <p className="text-xs text-blue-400 font-medium">New Active Period</p>
+                      <p className="text-sm text-stone-300 mt-1">
+                        Until: {new Date(selectedStockToContinue.newExpiry).toLocaleDateString()}
+                      </p>
+                      <p className="text-xs text-stone-500 mt-1">
+                        (Previous expiry + 30 days)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment Proof */}
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Payment Proof (Screenshot)</label>
+                <input
+                  type="file"
+                  onChange={(e) => setContinuePaymentProof(e.target.files[0])}
+                  required
+                  accept="image/*,.pdf"
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-blue-700"
+                />
+              </div>
+
+              {/* Payment Instructions */}
+              <div className="p-3 rounded-lg border border-stone-800 bg-black">
+                <p className="text-xs text-stone-400">Payment Instructions:</p>
+                <ul className="mt-2 space-y-1 text-xs text-stone-500">
+                  <li>1. Send payment to:</li>
+                  <li className="pl-4 text-stone-300 font-medium">BCA 7540249843</li>
+                  <li className="pl-4 text-stone-300 font-medium">a.n. Yitzhak Edmund Tio Manalu</li>
+                  <li>2. Upload screenshot of payment</li>
+                  <li>3. New stock ID will be auto-generated</li>
+                  <li>4. Wait for admin approval</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowContinueModal(false);
+                    setSelectedStockToContinue(null);
+                    setContinuePaymentProof(null);
+                  }}
+                  className="flex-1 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedStockToContinue || !continuePaymentProof}
+                  className="flex-1 h-10 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Submit Request
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Account Info Modal */}
+      {showAccountModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-medium text-stone-100 mb-4">Edit Account Info</h2>
+
+            <form onSubmit={handleUpdateAccount} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Email</label>
+                <input
+                  type="text"
+                  value={user?.email || ''}
+                  disabled
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-stone-900 text-stone-500 text-sm cursor-not-allowed"
+                />
+                <p className="text-xs text-stone-600 mt-1">Email cannot be changed</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={accountForm.displayName}
+                  onChange={(e) => setAccountForm({ ...accountForm, displayName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-emerald-700"
+                  placeholder="Enter display name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">WhatsApp Number</label>
+                <input
+                  type="text"
+                  value={accountForm.whatsappNumber}
+                  onChange={(e) => setAccountForm({ ...accountForm, whatsappNumber: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-emerald-700"
+                  placeholder="e.g. 62825252525"
+                />
+                <p className="text-xs text-stone-600 mt-1">Include country code without +</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Bank Provider</label>
+                <input
+                  type="text"
+                  value={accountForm.bankProvider}
+                  onChange={(e) => setAccountForm({ ...accountForm, bankProvider: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-emerald-700"
+                  placeholder="e.g. BCA"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Bank Number</label>
+                <input
+                  type="text"
+                  value={accountForm.bankNumber}
+                  onChange={(e) => setAccountForm({ ...accountForm, bankNumber: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-emerald-700"
+                  placeholder="e.g. 7540249843"
+                />
+                <p className="text-xs text-stone-600 mt-1">For receiving withdrawal payments</p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAccountModal(false)}
+                  className="flex-1 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 h-10 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

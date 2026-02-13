@@ -129,6 +129,10 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'admin';
   };
 
+  const refreshUser = async () => {
+    await checkAuth();
+  };
+
   const value = {
     user,
     loading,
@@ -136,6 +140,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAdmin,
     switchTestUser,
+    refreshUser,
     isAuthenticated: !!user
   };
 

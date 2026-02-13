@@ -55,6 +55,19 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // Account info
+  whatsappNumber: {
+    type: String,
+    default: null
+  },
+  bankProvider: {
+    type: String,
+    default: null
+  },
+  bankNumber: {
+    type: String,
+    default: null
+  },
   lastLogin: {
     type: Date
   },

@@ -36,8 +36,9 @@ api.interceptors.response.use(
         window.location.href = '/'
       }
     }
-    const message = error.response?.data?.message || error.message || 'An error occurred'
-    return Promise.reject(new Error(message))
+    // Don't wrap the error - pass through the original axios error
+    // so we can access error.response.data in catch blocks
+    return Promise.reject(error)
   }
 )
 
