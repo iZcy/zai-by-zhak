@@ -51,6 +51,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  withdrawableBalance: {
+    type: Number,
+    default: 0
+  },
   lastLogin: {
     type: Date
   },

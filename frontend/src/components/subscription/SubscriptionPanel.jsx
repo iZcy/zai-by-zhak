@@ -7,7 +7,10 @@ export default function SubscriptionPanel() {
   const [referralCode, setReferralCode] = useState('');
   const [subscriptions, setSubscriptions] = useState([]);
   const [activeReferrals, setActiveReferrals] = useState([]);
+  const [withdrawHistory, setWithdrawHistory] = useState([]);
   const [showBuyModal, setShowBuyModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [paymentProof, setPaymentProof] = useState(null);
   const [loading, setLoading] = useState(true);
   const [referredByCode, setReferredByCode] = useState(null);
@@ -36,11 +39,12 @@ export default function SubscriptionPanel() {
   const fetchData = async () => {
     console.log('fetchData called, user:', user?.email);
     try {
-      const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes] = await Promise.all([
+      const [dashboardRes, referralRes, subscriptionsRes, activeReferralsRes, withdrawRes] = await Promise.all([
         api.get('/subscription/dashboard'),
         api.get('/subscription/referral/code'),
         api.get('/subscription/my'),
-        api.get('/subscription/referral/active')
+        api.get('/subscription/referral/active'),
+        api.get('/subscription/withdraw/history').catch(() => ({ data: { withdraws: [] } }))
       ]);
 
       console.log('API responses received:', {
@@ -49,10 +53,11 @@ export default function SubscriptionPanel() {
         subscriptions: subscriptionsRes.data.subscriptions?.length
       });
 
-      setDashboard(dashboardRes.data.dashboard || { stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0 });
+      setDashboard(dashboardRes.data.dashboard || { stockCount: 0, activeReferrals: 0, monthlyProfit: 0, netCost: 0, withdrawableBalance: 0 });
       setReferralCode(referralRes.data.referralCode);
       setSubscriptions(subscriptionsRes.data.subscriptions || []);
       setActiveReferrals(activeReferralsRes.data.activeReferrals || []);
+      setWithdrawHistory(withdrawRes.data.withdraws || []);
 
       // Get the user's referral code used from the current user object (not from initial mount)
       // The user object in AuthContext should have referralCodeUsed from the backend
@@ -99,6 +104,24 @@ export default function SubscriptionPanel() {
     }
   };
 
+  const handleWithdrawRequest = async () => {
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      await api.post('/subscription/withdraw/request', { amount });
+      alert('Withdraw request submitted! Wait for admin approval.');
+      setShowWithdrawModal(false);
+      setWithdrawAmount('');
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Failed to submit withdraw request');
+    }
+  };
+
   // Filter subscriptions based on stockFilter
   const filteredSubscriptions = stockFilter === 'active'
     ? subscriptions.filter(sub => sub.isActive && !sub.isExpired)
@@ -109,7 +132,7 @@ export default function SubscriptionPanel() {
   return (
     <div className="space-y-6">
       {/* Dashboard Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="p-5 rounded-xl border border-stone-800 bg-black">
           <div className="flex justify-between items-start">
             <span className="text-xs font-medium text-stone-500">Stocks Owned</span>
@@ -157,6 +180,17 @@ export default function SubscriptionPanel() {
             <p className="text-xs text-stone-600 mt-1">
               {dashboard?.netCost < 0 ? 'Monthly earnings' : 'Monthly cost'}
             </p>
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl border border-stone-800 bg-black">
+          <div className="flex justify-between items-start">
+            <span className="text-xs font-medium text-stone-500">Withdrawable</span>
+            <iconify-icon icon="solar:hand-money-linear" width="20" className="text-blue-500"></iconify-icon>
+          </div>
+          <div className="mt-3">
+            <span className="text-2xl font-semibold text-blue-400">${(dashboard?.withdrawableBalance || 0).toFixed(2)}</span>
+            <p className="text-xs text-stone-600 mt-1">Available to withdraw</p>
           </div>
         </div>
       </div>
@@ -363,6 +397,65 @@ export default function SubscriptionPanel() {
         </div>
       )}
 
+      {/* Withdraw History */}
+      <div className="p-6 rounded-xl border border-stone-800 bg-black">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-medium text-stone-100">Withdraw History</h2>
+          <button
+            onClick={() => setShowWithdrawModal(true)}
+            disabled={(dashboard?.withdrawableBalance || 0) < 2}
+            className={`h-9 px-4 rounded-md text-xs font-medium ${
+              (dashboard?.withdrawableBalance || 0) < 2
+                ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            Request Withdraw
+          </button>
+        </div>
+
+        {withdrawHistory.length === 0 ? (
+          <div className="text-center py-8">
+            <iconify-icon icon="solar:wallet-linear" width="48" className="mx-auto text-stone-800 mb-4"></iconify-icon>
+            <p className="text-stone-500 mb-2">No withdraw history</p>
+            <p className="text-xs text-stone-600">Request a withdraw to see it here</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {withdrawHistory.map((w) => (
+              <div key={w.id} className="p-4 rounded-lg border border-stone-800 bg-black">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-stone-200">${w.netAmount?.toFixed(2)}</p>
+                    <p className="text-xs text-stone-500">Fee: ${w.fee?.toFixed(2)}</p>
+                  </div>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                    w.status === 'approved'
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
+                      : w.status === 'rejected'
+                      ? 'bg-red-950 text-red-300 border border-red-900'
+                      : 'bg-yellow-950 text-yellow-300 border border-yellow-900'
+                  }`}>
+                    {w.status}
+                  </span>
+                </div>
+                <p className="text-xs text-stone-600">
+                  Requested: {new Date(w.requestedAt).toLocaleDateString()}
+                </p>
+                {w.processedAt && (
+                  <p className="text-xs text-stone-600">
+                    Processed: {new Date(w.processedAt).toLocaleDateString()}
+                  </p>
+                )}
+                {w.adminNote && (
+                  <p className="text-xs text-stone-500 mt-2">Note: {w.adminNote}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Buy Stock Modal */}
       {showBuyModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
@@ -407,6 +500,68 @@ export default function SubscriptionPanel() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Withdraw Modal */}
+      {showWithdrawModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-medium text-stone-100 mb-4">Request Withdraw</h2>
+
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg border border-stone-800 bg-stone-900/50">
+                <p className="text-xs text-stone-500">Available Balance</p>
+                <p className="text-2xl font-semibold text-blue-400">${(dashboard?.withdrawableBalance || 0).toFixed(2)}</p>
+                <p className="text-xs text-stone-600 mt-1">
+                  Max withdrawable: ${((dashboard?.withdrawableBalance || 0) - 1).toFixed(2)} (after $1 fee)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">Withdraw Amount ($)</label>
+                <input
+                  type="number"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  step="0.01"
+                  min="1"
+                  max={(dashboard?.withdrawableBalance || 0) - 1}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-blue-700"
+                  placeholder="Enter amount"
+                />
+              </div>
+
+              <div className="p-3 rounded-lg border border-yellow-900/50 bg-yellow-950/20">
+                <div className="flex items-start gap-2">
+                  <iconify-icon icon="solar:info-circle-linear" width="16" className="text-yellow-500 mt-0.5"></iconify-icon>
+                  <p className="text-xs text-yellow-200/80">
+                    A $1 processing fee will be deducted from your withdrawable balance.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWithdrawModal(false);
+                    setWithdrawAmount('');
+                  }}
+                  className="flex-1 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWithdrawRequest}
+                  className="flex-1 h-10 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Submit Request
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

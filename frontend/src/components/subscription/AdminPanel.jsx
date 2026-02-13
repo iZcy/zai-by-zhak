@@ -6,6 +6,7 @@ export default function AdminSubscriptionPanel() {
   const [pendingSubscriptions, setPendingSubscriptions] = useState([]);
   const [activeSubscriptions, setActiveSubscriptions] = useState([]);
   const [usersStats, setUsersStats] = useState([]);
+  const [withdrawRequests, setWithdrawRequests] = useState([]);
   const [selectedSubscription, setSelectedSubscription] = useState(null);
   const [apiToken, setApiToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -14,6 +15,9 @@ export default function AdminSubscriptionPanel() {
   const [editingToken, setEditingToken] = useState(null);
   const [tokenValue, setTokenValue] = useState('');
   const [showReferralsPopup, setShowReferralsPopup] = useState(null);
+  const [showApproveWithdraw, setShowApproveWithdraw] = useState(null);
+  const [withdrawNote, setWithdrawNote] = useState('');
+  const [withdrawReceipt, setWithdrawReceipt] = useState(null);
 
   // Filters
   const [activeUntilFrom, setActiveUntilFrom] = useState('');
@@ -28,19 +32,22 @@ export default function AdminSubscriptionPanel() {
 
   const fetchData = async () => {
     try {
-      const [pendingRes, subscriptionsRes, usersRes] = await Promise.all([
+      const [pendingRes, subscriptionsRes, usersRes, withdrawRes] = await Promise.all([
         api.get('/subscription/admin/subscriptions/pending').catch(() => ({ data: { subscriptions: [] } })),
         api.get('/subscription/admin/subscriptions/all').catch(() => ({ data: { subscriptions: [] } })),
-        api.get('/subscription/admin/users/stats').catch(() => ({ data: { users: [] } }))
+        api.get('/subscription/admin/users/stats').catch(() => ({ data: { users: [] } })),
+        api.get('/subscription/admin/withdraw/requests').catch(() => ({ data: { withdraws: [] } }))
       ]);
 
       const pending = pendingRes.data.subscriptions || [];
       const subscriptions = subscriptionsRes.data.subscriptions || [];
       const users = usersRes.data.users || [];
+      const withdraws = withdrawRes.data.withdraws || [];
 
       setPendingSubscriptions(pending);
       setActiveSubscriptions(subscriptions);
       setUsersStats(users);
+      setWithdrawRequests(withdraws);
 
       // Pre-fetch payment proof images with authentication
       await fetchPaymentProofImages([...pending, ...subscriptions]);
@@ -160,6 +167,45 @@ export default function AdminSubscriptionPanel() {
       fetchData();
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to toggle subscription');
+    }
+  };
+
+  const handleApproveWithdraw = async () => {
+    if (!withdrawReceipt) {
+      alert('Please upload a receipt');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('receipt', withdrawReceipt);
+    if (withdrawNote) {
+      formData.append('note', withdrawNote);
+    }
+
+    try {
+      await api.post(`/subscription/admin/withdraw/${showApproveWithdraw.id}/approve`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      alert('Withdraw approved and receipt uploaded!');
+      setShowApproveWithdraw(null);
+      setWithdrawNote('');
+      setWithdrawReceipt(null);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Failed to approve withdraw');
+    }
+  };
+
+  const handleRejectWithdraw = async (withdrawId) => {
+    const reason = prompt('Enter rejection reason:');
+    if (!reason) return;
+
+    try {
+      await api.post(`/subscription/admin/withdraw/${withdrawId}/reject`, { reason });
+      alert('Withdraw request rejected');
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Failed to reject withdraw');
     }
   };
 
@@ -287,6 +333,83 @@ export default function AdminSubscriptionPanel() {
                       Reject
                     </button>
                   </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Withdraw Requests */}
+      <div className="p-6 rounded-xl border border-stone-800 bg-black">
+        <h2 className="text-sm font-medium text-stone-100 mb-4">
+          Withdraw Requests ({withdrawRequests.filter(w => w.status === 'pending').length} pending)
+        </h2>
+
+        {withdrawRequests.length === 0 ? (
+          <p className="text-stone-500 text-center py-8">No withdraw requests</p>
+        ) : (
+          <div className="space-y-4">
+            {withdrawRequests.map((w) => (
+              <div key={w.id} className={`p-4 rounded-lg border ${w.status === 'pending' ? 'border-yellow-900/50 bg-yellow-950/10' : 'border-stone-800'}`}>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-blue-950 flex items-center justify-center">
+                        <iconify-icon icon="solar:wallet-linear" width="20" className="text-blue-400"></iconify-icon>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-stone-200">{w.user?.displayName || w.user?.email}</p>
+                        <p className="text-xs text-stone-600">{w.user?.email}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center gap-4">
+                      <div>
+                        <p className="text-xs text-stone-500">Amount</p>
+                        <p className="text-lg font-semibold text-blue-400">${w.netAmount?.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-stone-500">Fee</p>
+                        <p className="text-sm text-stone-400">${w.fee?.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-stone-500">Requested</p>
+                        <p className="text-sm text-stone-300">{new Date(w.requestedAt).toLocaleDateString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-stone-500">Status</p>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          w.status === 'approved'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
+                            : w.status === 'rejected'
+                            ? 'bg-red-950 text-red-300 border border-red-900'
+                            : 'bg-yellow-950 text-yellow-300 border border-yellow-900'
+                        }`}>
+                          {w.status}
+                        </span>
+                      </div>
+                    </div>
+                    {w.adminNote && (
+                      <p className="text-xs text-stone-500 mt-2">Note: {w.adminNote}</p>
+                    )}
+                  </div>
+
+                  {w.status === 'pending' && (
+                    <div className="flex gap-2 ml-4">
+                      <button
+                        onClick={() => setShowApproveWithdraw(w)}
+                        className="h-9 px-3 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleRejectWithdraw(w.id)}
+                        className="h-9 px-3 rounded-lg text-xs font-medium border border-red-900 text-red-400 hover:bg-red-950"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -666,6 +789,74 @@ export default function AdminSubscriptionPanel() {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Withdraw Modal */}
+      {showApproveWithdraw && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-black border border-stone-800 rounded-xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-medium text-stone-100 mb-4">Approve Withdraw</h2>
+
+            <div className="space-y-4 mb-6">
+              <div className="p-4 rounded-lg border border-stone-800 bg-black">
+                <p className="text-xs text-stone-500">User</p>
+                <p className="text-sm text-stone-200">{showApproveWithdraw.user?.displayName || showApproveWithdraw.user?.email}</p>
+                <p className="text-xs text-stone-600">{showApproveWithdraw.user?.email}</p>
+              </div>
+
+              <div className="p-4 rounded-lg border border-blue-900/50 bg-blue-950/20">
+                <p className="text-xs text-stone-500">Withdraw Amount</p>
+                <p className="text-2xl font-semibold text-blue-400">${showApproveWithdraw.netAmount?.toFixed(2)}</p>
+                <p className="text-xs text-stone-600 mt-1">+ ${showApproveWithdraw.fee?.toFixed(2)} fee = ${(showApproveWithdraw.netAmount + showApproveWithdraw.fee)?.toFixed(2)} total deduction</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">
+                  Note (optional)
+                </label>
+                <input
+                  type="text"
+                  value={withdrawNote}
+                  onChange={(e) => setWithdrawNote(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-blue-700"
+                  placeholder="Add a note for the user"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-400 mb-1">
+                  Withdraw Receipt *
+                </label>
+                <input
+                  type="file"
+                  onChange={(e) => setWithdrawReceipt(e.target.files[0])}
+                  required
+                  accept="image/*,.pdf"
+                  className="w-full px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-blue-700"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowApproveWithdraw(null);
+                  setWithdrawNote('');
+                  setWithdrawReceipt(null);
+                }}
+                className="flex-1 h-10 rounded-lg text-sm font-medium border border-stone-800 text-stone-300 hover:bg-stone-900"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApproveWithdraw}
+                className="flex-1 h-10 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Approve & Upload Receipt
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -3,6 +3,7 @@ import { authenticate, requireAdmin } from '../auth/jwt.js';
 import Subscription from '../models/Subscription.js';
 import Referral from '../models/Referral.js';
 import User from '../models/User.js';
+import Withdraw from '../models/Withdraw.js';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -530,11 +531,20 @@ router.post('/admin/subscriptions/:subscriptionId/approve', authenticate, requir
     subscription.lastActivatedAt = new Date();
     await subscription.save();
 
-    // Check if this is a referral and update firstActiveDate
+    // Check if this is a referral and update firstActiveDate + add to referrer's withdrawable balance
     const referral = await Referral.findOne({ referredUserId: subscription.userId });
-    if (referral && !referral.firstActiveDate) {
-      referral.firstActiveDate = new Date();
-      await referral.save();
+    if (referral) {
+      if (!referral.firstActiveDate) {
+        referral.firstActiveDate = new Date();
+        await referral.save();
+      }
+
+      // Add referral bonus to referrer's withdrawable balance
+      const referrer = await User.findById(referral.referrerId);
+      if (referrer) {
+        referrer.withdrawableBalance = (referrer.withdrawableBalance || 0) + referral.profitPerMonth;
+        await referrer.save();
+      }
     }
 
     res.json({
@@ -721,6 +731,9 @@ router.get('/dashboard', authenticate, async (req, res) => {
   try {
     const userId = req.user._id;
 
+    // Get user data for withdrawable balance
+    const user = await User.findById(userId);
+
     // Get user's subscription
     const subscription = await Subscription.findOne({
       userId: userId,
@@ -773,7 +786,8 @@ router.get('/dashboard', authenticate, async (req, res) => {
         totalReferrals: referrals.length,
         activeReferrals: activeReferrals.length,
         monthlyProfit: monthlyProfit,
-        netCost: netCost
+        netCost: netCost,
+        withdrawableBalance: user?.withdrawableBalance || 0
       }
     });
   } catch (error) {
@@ -855,6 +869,270 @@ router.post('/admin/subscriptions/:subscriptionId/expire', authenticate, require
       success: false,
       message: error.message
     });
+  }
+});
+
+// ============ WITHDRAW ENDPOINTS ============
+
+// User: Get withdraw history
+router.get('/withdraw/history', authenticate, async (req, res) => {
+  try {
+    const withdraws = await Withdraw.find({ userId: req.user._id })
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      withdraws: withdraws.map(w => ({
+        id: w._id,
+        amount: w.amount,
+        fee: w.fee,
+        netAmount: w.netAmount,
+        status: w.status,
+        receipt: w.receipt,
+        adminNote: w.adminNote,
+        requestedAt: w.requestedAt,
+        processedAt: w.processedAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// User: Request withdraw
+router.post('/withdraw/request', authenticate, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const user = await User.findById(req.user._id);
+
+    const maxWithdrawable = (user.withdrawableBalance || 0) - 1; // $1 fee
+
+    if (amount > maxWithdrawable) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum withdrawable is $${maxWithdrawable.toFixed(2)} (after $1 fee)`
+      });
+    }
+
+    if (amount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimum withdraw amount is $1'
+      });
+    }
+
+    const withdraw = await Withdraw.create({
+      userId: user._id,
+      amount: amount,
+      fee: 1,
+      netAmount: amount,
+      status: 'pending'
+    });
+
+    res.json({
+      success: true,
+      message: 'Withdraw request submitted',
+      withdraw: {
+        id: withdraw._id,
+        amount: withdraw.amount,
+        fee: withdraw.fee,
+        netAmount: withdraw.netAmount,
+        status: withdraw.status,
+        requestedAt: withdraw.requestedAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Get all withdraw requests
+router.get('/admin/withdraw/requests', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const withdraws = await Withdraw.find()
+      .populate('userId', 'email displayName')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      withdraws: withdraws.map(w => ({
+        id: w._id,
+        user: w.userId,
+        amount: w.amount,
+        fee: w.fee,
+        netAmount: w.netAmount,
+        status: w.status,
+        receipt: w.receipt,
+        adminNote: w.adminNote,
+        requestedAt: w.requestedAt,
+        processedAt: w.processedAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Configure multer for withdraw receipts
+const withdrawReceiptStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads/withdraw-receipts');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'receipt-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const withdrawReceiptUpload = multer({
+  storage: withdrawReceiptStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp|pdf/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only images and PDFs are allowed'));
+    }
+  }
+});
+
+// Admin: Approve withdraw with receipt
+router.post('/admin/withdraw/:withdrawId/approve', authenticate, requireAdmin, withdrawReceiptUpload.single('receipt'), async (req, res) => {
+  try {
+    const { withdrawId } = req.params;
+    const { note } = req.body;
+
+    const withdraw = await Withdraw.findById(withdrawId);
+    if (!withdraw) {
+      return res.status(404).json({
+        success: false,
+        message: 'Withdraw request not found'
+      });
+    }
+
+    if (withdraw.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Withdraw request already processed'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Receipt is required'
+      });
+    }
+
+    // Get user and deduct from withdrawable balance
+    const user = await User.findById(withdraw.userId);
+    const totalDeduction = withdraw.amount + withdraw.fee; // amount + $1 fee
+
+    if (user.withdrawableBalance < totalDeduction) {
+      return res.status(400).json({
+        success: false,
+        message: 'User has insufficient withdrawable balance'
+      });
+    }
+
+    user.withdrawableBalance -= totalDeduction;
+    await user.save();
+
+    // Update withdraw record
+    withdraw.status = 'approved';
+    withdraw.receipt = `/uploads/withdraw-receipts/${req.file.filename}`;
+    withdraw.adminNote = note;
+    withdraw.processedAt = new Date();
+    withdraw.processedBy = req.user._id;
+    await withdraw.save();
+
+    res.json({
+      success: true,
+      message: 'Withdraw approved and receipt uploaded',
+      withdraw: {
+        id: withdraw._id,
+        status: withdraw.status,
+        receipt: withdraw.receipt,
+        processedAt: withdraw.processedAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Admin: Reject withdraw
+router.post('/admin/withdraw/:withdrawId/reject', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { withdrawId } = req.params;
+    const { reason } = req.body;
+
+    const withdraw = await Withdraw.findById(withdrawId);
+    if (!withdraw) {
+      return res.status(404).json({
+        success: false,
+        message: 'Withdraw request not found'
+      });
+    }
+
+    if (withdraw.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Withdraw request already processed'
+      });
+    }
+
+    withdraw.status = 'rejected';
+    withdraw.adminNote = reason;
+    withdraw.processedAt = new Date();
+    withdraw.processedBy = req.user._id;
+    await withdraw.save();
+
+    res.json({
+      success: true,
+      message: 'Withdraw request rejected',
+      withdraw: {
+        id: withdraw._id,
+        status: withdraw.status,
+        processedAt: withdraw.processedAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Serve withdraw receipt files (admin only)
+router.get('/uploads/withdraw-receipts/:filename', authenticate, requireAdmin, (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, '../../uploads/withdraw-receipts', filename);
+
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ success: false, message: 'File not found' });
   }
 });
 
