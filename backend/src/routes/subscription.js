@@ -118,14 +118,15 @@ router.post('/referral/insert', authenticate, async (req, res) => {
       referralCode: referralCode
     });
 
-    // Update user record
+    // Update user record and add $2.50 bonus to their withdrawable balance
     user.referredBy = referrer._id;
     user.referralCodeUsed = referralCode;
+    user.withdrawableBalance = (user.withdrawableBalance || 0) + 2.5;
     await user.save();
 
     res.json({
       success: true,
-      message: 'Referral code applied successfully',
+      message: 'Referral code applied successfully! $2.50 bonus added to your balance.',
       referrer: {
         displayName: referrer.displayName,
         email: referrer.email
@@ -483,7 +484,8 @@ router.get('/admin/users/stats', authenticate, requireAdmin, async (req, res) =>
         activeReferralsCount: activeReferrals.length,
         activeReferrals,
         bonus,
-        netValue
+        netValue,
+        withdrawableBalance: user.withdrawableBalance || 0
       };
     }));
 

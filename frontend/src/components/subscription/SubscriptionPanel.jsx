@@ -15,7 +15,8 @@ export default function SubscriptionPanel() {
   const [paymentProof, setPaymentProof] = useState(null);
   const [loading, setLoading] = useState(true);
   const [referredByCode, setReferredByCode] = useState(null);
-  const [stockFilter, setStockFilter] = useState('active'); // 'active', 'all'
+  const [stockFilter, setStockFilter] = useState('ongoing'); // 'ongoing', 'all'
+  const [exchangeRate, setExchangeRate] = useState(null);
   const { user } = useAuth();
   const toast = useToast();
 
@@ -24,6 +25,20 @@ export default function SubscriptionPanel() {
       fetchData();
     }
   }, [user]);
+
+  // Fetch exchange rate
+  useEffect(() => {
+    const fetchExchangeRate = async () => {
+      try {
+        const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+        const data = await response.json();
+        setExchangeRate(data.rates.IDR);
+      } catch (error) {
+        console.error('Failed to fetch exchange rate:', error);
+      }
+    };
+    fetchExchangeRate();
+  }, []);
 
   // Update referredByCode when user changes
   useEffect(() => {
@@ -124,9 +139,13 @@ export default function SubscriptionPanel() {
     }
   };
 
+  // Check if user has pending stocks
+  const hasPendingStocks = subscriptions.some(sub => sub.status === 'pending');
+
   // Filter subscriptions based on stockFilter
-  const filteredSubscriptions = stockFilter === 'active'
-    ? subscriptions.filter(sub => sub.isActive && !sub.isExpired)
+  // "ongoing" shows both active and pending stocks
+  const filteredSubscriptions = stockFilter === 'ongoing'
+    ? subscriptions.filter(sub => (sub.isActive && !sub.isExpired) || sub.status === 'pending')
     : subscriptions;
 
   if (loading) return <div className="text-stone-400">Loading...</div>;
@@ -190,25 +209,25 @@ export default function SubscriptionPanel() {
           <h2 className="text-sm font-medium text-stone-100">My Stocks</h2>
           <button
             onClick={() => setShowBuyModal(true)}
-            disabled={dashboard?.hasActiveSubscription}
+            disabled={dashboard?.hasActiveSubscription || hasPendingStocks}
             className={`h-9 px-4 rounded-md text-xs font-medium ${
-              dashboard?.hasActiveSubscription
+              dashboard?.hasActiveSubscription || hasPendingStocks
                 ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
                 : 'bg-emerald-600 text-white hover:bg-emerald-700'
             }`}
           >
-            {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : 'Buy Stock'}
+            {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : hasPendingStocks ? 'Pending Request' : 'Buy Stock'}
           </button>
           <div className="flex items-center gap-2 ml-4">
             <button
-              onClick={() => setStockFilter('active')}
+              onClick={() => setStockFilter('ongoing')}
               className={`px-2 py-1 rounded text-xs font-medium ${
-                stockFilter === 'active'
+                stockFilter === 'ongoing'
                   ? 'bg-emerald-600 text-white'
                   : 'bg-stone-800 text-stone-400 hover:text-stone-200'
               }`}
             >
-              Active
+              Ongoing
             </button>
             <button
               onClick={() => setStockFilter('all')}
@@ -226,9 +245,9 @@ export default function SubscriptionPanel() {
         {filteredSubscriptions.length === 0 ? (
           <div className="text-center py-12">
             <iconify-icon icon="solar:box-linear" width="48" className="mx-auto text-stone-800 mb-4"></iconify-icon>
-            <p className="text-stone-500 mb-2">{stockFilter === 'active' ? 'No active stocks' : 'No stocks yet'}</p>
+            <p className="text-stone-500 mb-2">{stockFilter === 'ongoing' ? 'No ongoing stocks' : 'No stocks yet'}</p>
             <p className="text-xs text-stone-600">
-              {stockFilter === 'active' ? 'All your stocks are expired or cancelled' : 'Buy your first stock to access API'}
+              {stockFilter === 'ongoing' ? 'No active or pending stocks' : 'Buy your first stock to access API'}
             </p>
           </div>
         ) : (
@@ -316,15 +335,15 @@ export default function SubscriptionPanel() {
             <ul className="space-y-2 text-sm text-stone-300">
               <li className="flex items-center gap-2">
                 <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
+                <span>Enter a referral code to get <span className="text-emerald-400 font-medium">$2.50 bonus</span></span>
+              </li>
+              <li className="flex items-center gap-2">
+                <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
                 <span>Share your referral code with friends</span>
               </li>
               <li className="flex items-center gap-2">
                 <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
                 <span>When they buy stocks, you earn $2.50 per their payment</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
-                <span>Active = paid within last 30 days</span>
               </li>
             </ul>
           </div>
@@ -454,11 +473,18 @@ export default function SubscriptionPanel() {
               <div className="p-3 rounded-lg border border-stone-800 bg-black">
                 <p className="text-xs text-stone-400">Payment Instructions:</p>
                 <ul className="mt-2 space-y-1 text-xs text-stone-500">
-                  <li>1. Send $10 to: [Your Payment Details]</li>
+                  <li>1. Send $10 {exchangeRate ? `(Rp${(10 * exchangeRate).toLocaleString('id-ID')})` : ''} to:</li>
+                  <li className="pl-4 text-stone-300 font-medium">BCA 7540249843</li>
+                  <li className="pl-4 text-stone-300 font-medium">a.n. Yitzhak Edmund Tio Manalu</li>
                   <li>2. Upload screenshot of payment</li>
                   <li>3. Stock ID will be auto-generated</li>
                   <li>4. Wait for admin approval</li>
                 </ul>
+                {exchangeRate && (
+                  <p className="mt-2 text-[10px] text-stone-600">
+                    * IDR rate is dynamic based on global currency rate
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-3">

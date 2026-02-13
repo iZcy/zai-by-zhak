@@ -470,6 +470,7 @@ export default function AdminSubscriptionPanel() {
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Stocks Fee</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Active Referrals</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Bonus</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Withdrawable</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-stone-500">Net Value</th>
                 </tr>
               </thead>
@@ -494,6 +495,9 @@ export default function AdminSubscriptionPanel() {
                       </button>
                     </td>
                     <td className="py-3 px-4 text-sm text-emerald-400 font-medium">${user.bonus.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-sm text-blue-400 font-medium">
+                      ${Math.max(0, (user.withdrawableBalance || 0) - 1).toFixed(2)}
+                    </td>
                     <td className="py-3 px-4 text-sm font-medium">
                       <span className={user.netValue >= 0 ? 'text-red-400' : 'text-emerald-400'}>
                         {user.netValue >= 0 ? '+' : ''}${Math.abs(user.netValue).toFixed(2)}
