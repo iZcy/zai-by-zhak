@@ -11,6 +11,7 @@ export default function SubscriptionPanel() {
   const [paymentProof, setPaymentProof] = useState(null);
   const [loading, setLoading] = useState(true);
   const [referredByCode, setReferredByCode] = useState(null);
+  const [stockFilter, setStockFilter] = useState('active'); // 'active', 'all'
   const { user } = useAuth();
 
   useEffect(() => {
@@ -98,6 +99,11 @@ export default function SubscriptionPanel() {
     }
   };
 
+  // Filter subscriptions based on stockFilter
+  const filteredSubscriptions = stockFilter === 'active'
+    ? subscriptions.filter(sub => sub.isActive && !sub.isExpired)
+    : subscriptions;
+
   if (loading) return <div className="text-stone-400">Loading...</div>;
 
   return (
@@ -182,17 +188,41 @@ export default function SubscriptionPanel() {
           >
             {dashboard?.hasActiveSubscription ? 'Active Stock Exists' : 'Buy Stock'}
           </button>
+          <div className="flex items-center gap-2 ml-4">
+            <button
+              onClick={() => setStockFilter('active')}
+              className={`px-2 py-1 rounded text-xs font-medium ${
+                stockFilter === 'active'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-stone-800 text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => setStockFilter('all')}
+              className={`px-2 py-1 rounded text-xs font-medium ${
+                stockFilter === 'all'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-stone-800 text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              All
+            </button>
+          </div>
         </div>
 
-        {subscriptions.length === 0 ? (
+        {filteredSubscriptions.length === 0 ? (
           <div className="text-center py-12">
             <iconify-icon icon="solar:box-linear" width="48" className="mx-auto text-stone-800 mb-4"></iconify-icon>
-            <p className="text-stone-500 mb-2">No stocks yet</p>
-            <p className="text-xs text-stone-600">Buy your first stock to access API</p>
+            <p className="text-stone-500 mb-2">{stockFilter === 'active' ? 'No active stocks' : 'No stocks yet'}</p>
+            <p className="text-xs text-stone-600">
+              {stockFilter === 'active' ? 'All your stocks are expired or cancelled' : 'Buy your first stock to access API'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {subscriptions.map((sub) => (
+            {filteredSubscriptions.map((sub) => (
               <div key={sub.id} className="p-4 rounded-lg border border-stone-800 bg-black">
                 <div className="flex items-center justify-between mb-3">
                   <div>
@@ -404,21 +434,9 @@ function InsertReferralCode({ onSuccess, disabled }) {
     }
   };
 
+  // Don't show input if user already has a referral code
   if (disabled) {
-    return (
-      <div className="p-4 rounded-lg border border-stone-800 bg-stone-900 opacity-50">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-stone-500">Referral Code</p>
-            <p className="text-sm text-stone-400 mt-1">You have already used a referral code</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <iconify-icon icon="solar:lock-closed-linear" width="16" className="text-stone-600"></iconify-icon>
-            <span className="text-xs text-stone-600">Locked</span>
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
