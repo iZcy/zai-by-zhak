@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ToastProvider } from './contexts/ToastContext'
 import LoginButton from './components/auth/LoginButton'
 import SubscriptionPanel from './components/subscription/SubscriptionPanel'
 import AdminSubscriptionPanel from './components/subscription/AdminPanel'
@@ -73,7 +74,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </AuthProvider>
   )
 }

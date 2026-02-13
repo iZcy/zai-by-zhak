@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 
 export default function SubscriptionPanel() {
   const [dashboard, setDashboard] = useState(null);
@@ -16,6 +17,7 @@ export default function SubscriptionPanel() {
   const [referredByCode, setReferredByCode] = useState(null);
   const [stockFilter, setStockFilter] = useState('active'); // 'active', 'all'
   const { user } = useAuth();
+  const toast = useToast();
 
   useEffect(() => {
     if (user) {
@@ -76,14 +78,14 @@ export default function SubscriptionPanel() {
 
   const handleCopyReferralCode = () => {
     navigator.clipboard.writeText(referralCode);
-    alert('Referral code copied!');
+    toast.showSuccess('Referral code copied!');
   };
 
   const handleBuySubscription = async (e) => {
     e.preventDefault();
 
     if (!paymentProof) {
-      alert('Please provide payment proof');
+      toast.showError('Please provide payment proof');
       return;
     }
 
@@ -95,30 +97,30 @@ export default function SubscriptionPanel() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
-      alert('Subscription request submitted! Wait for admin approval.\nYour Stock ID will be generated automatically.');
+      toast.showSuccess('Subscription request submitted! Wait for admin approval.');
       setShowBuyModal(false);
       setPaymentProof(null);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to submit request');
+      toast.showError(error.response?.data?.message || 'Failed to submit request');
     }
   };
 
   const handleWithdrawRequest = async () => {
     const amount = parseFloat(withdrawAmount);
     if (!amount || amount <= 0) {
-      alert('Please enter a valid amount');
+      toast.showError('Please enter a valid amount');
       return;
     }
 
     try {
       await api.post('/subscription/withdraw/request', { amount });
-      alert('Withdraw request submitted! Wait for admin approval.');
+      toast.showSuccess('Withdraw request submitted! Wait for admin approval.');
       setShowWithdrawModal(false);
       setWithdrawAmount('');
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to submit withdraw request');
+      toast.showError(error.response?.data?.message || 'Failed to submit withdraw request');
     }
   };
 
@@ -132,18 +134,7 @@ export default function SubscriptionPanel() {
   return (
     <div className="space-y-6">
       {/* Dashboard Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="p-5 rounded-xl border border-stone-800 bg-black">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-stone-500">Stocks Owned</span>
-            <iconify-icon icon="solar:box-linear" width="20" className="text-stone-700"></iconify-icon>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-semibold text-stone-200">{dashboard?.stockCount || 0}</span>
-            <p className="text-xs text-stone-600 mt-1">$10/month per stock</p>
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="p-5 rounded-xl border border-stone-800 bg-black">
           <div className="flex justify-between items-start">
             <span className="text-xs font-medium text-stone-500">Active Referrals</span>
@@ -151,7 +142,7 @@ export default function SubscriptionPanel() {
           </div>
           <div className="mt-3">
             <span className="text-2xl font-semibold text-stone-200">{dashboard?.activeReferrals || 0}</span>
-            <p className="text-xs text-stone-600 mt-1">$2.50 profit each</p>
+            <p className="text-xs text-stone-600 mt-1">$2.50 per payment</p>
           </div>
         </div>
 
@@ -295,7 +286,7 @@ export default function SubscriptionPanel() {
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(sub.apiToken);
-                          alert('API token copied!');
+                          toast.showSuccess('API token copied!');
                         }}
                         className="ml-3 h-8 px-3 rounded text-xs font-medium bg-stone-800 text-stone-300 hover:bg-stone-700"
                       >
@@ -343,7 +334,7 @@ export default function SubscriptionPanel() {
               </li>
               <li className="flex items-center gap-2">
                 <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
-                <span>When they buy stocks, you earn $2.50/month per active user</span>
+                <span>When they buy stocks, you earn $2.50 per their payment</span>
               </li>
               <li className="flex items-center gap-2">
                 <iconify-icon icon="solar:check-circle-linear" width="16" className="text-emerald-500"></iconify-icon>
@@ -369,7 +360,7 @@ export default function SubscriptionPanel() {
             </div>
           )}
 
-          <InsertReferralCode onSuccess={fetchData} disabled={!!referredByCode} />
+          <InsertReferralCode onSuccess={fetchData} disabled={!!referredByCode} toast={toast} />
         </div>
       </div>
 
@@ -569,7 +560,7 @@ export default function SubscriptionPanel() {
   );
 }
 
-function InsertReferralCode({ onSuccess, disabled }) {
+function InsertReferralCode({ onSuccess, disabled, toast }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -579,11 +570,11 @@ function InsertReferralCode({ onSuccess, disabled }) {
 
     try {
       await api.post('/subscription/referral/insert', { referralCode: code });
-      alert('Referral code applied successfully!');
+      toast.showSuccess('Referral code applied successfully!');
       setCode('');
       onSuccess();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to apply referral code');
+      toast.showError(error.response?.data?.message || 'Failed to apply referral code');
     } finally {
       setLoading(false);
     }
@@ -600,7 +591,7 @@ function InsertReferralCode({ onSuccess, disabled }) {
         type="text"
         value={code}
         onChange={(e) => setCode(e.target.value.toUpperCase())}
-        placeholder="Enter referral code"
+        placeholder="Enter referral code (only once)"
         className="flex-1 px-3 py-2 rounded-lg border border-stone-800 bg-black text-stone-200 text-sm focus:outline-none focus:border-emerald-700"
         maxLength="20"
       />

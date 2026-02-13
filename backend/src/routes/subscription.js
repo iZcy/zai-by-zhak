@@ -726,6 +726,39 @@ router.post('/admin/subscriptions/:subscriptionId/toggle', authenticate, require
   }
 });
 
+// Admin: Update subscription activeUntil date
+router.put('/admin/subscriptions/:subscriptionId/active-until', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const { activeUntil } = req.body;
+
+    const subscription = await Subscription.findById(subscriptionId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    subscription.activeUntil = new Date(activeUntil);
+    await subscription.save();
+
+    res.json({
+      success: true,
+      message: 'Active until date updated',
+      subscription: {
+        id: subscription._id,
+        activeUntil: subscription.activeUntil
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // Get dashboard summary
 router.get('/dashboard', authenticate, async (req, res) => {
   try {

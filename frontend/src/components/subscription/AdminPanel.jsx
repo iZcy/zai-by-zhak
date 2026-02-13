@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 
 export default function AdminSubscriptionPanel() {
   const [pendingSubscriptions, setPendingSubscriptions] = useState([]);
@@ -18,6 +19,9 @@ export default function AdminSubscriptionPanel() {
   const [showApproveWithdraw, setShowApproveWithdraw] = useState(null);
   const [withdrawNote, setWithdrawNote] = useState('');
   const [withdrawReceipt, setWithdrawReceipt] = useState(null);
+  const [editingActiveUntil, setEditingActiveUntil] = useState(null);
+  const [activeUntilValue, setActiveUntilValue] = useState('');
+  const toast = useToast();
 
   // Filters
   const [activeUntilFrom, setActiveUntilFrom] = useState('');
@@ -96,7 +100,7 @@ export default function AdminSubscriptionPanel() {
 
   const handleApprove = async () => {
     if (!selectedSubscription || !apiToken) {
-      alert('Please provide an API token');
+      toast.showError('Please provide an API token');
       return;
     }
 
@@ -109,14 +113,14 @@ export default function AdminSubscriptionPanel() {
       });
 
       console.log('Approve response:', response.data);
-      alert('Subscription approved!');
+      toast.showSuccess('Subscription approved!');
       setSelectedSubscription(null);
       setApiToken('');
       fetchData();
     } catch (error) {
       console.error('Approve error:', error);
       console.error('Error response:', error.response);
-      alert(error.response?.data?.message || error.message || 'Failed to approve subscription');
+      toast.showError(error.response?.data?.message || error.message || 'Failed to approve subscription');
     }
   };
 
@@ -129,20 +133,20 @@ export default function AdminSubscriptionPanel() {
         reason
       });
 
-      alert('Subscription rejected');
+      toast.showSuccess('Subscription rejected');
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to reject subscription');
+      toast.showError(error.response?.data?.message || 'Failed to reject subscription');
     }
   };
 
   const handleToggleRole = async (userId) => {
     try {
       const response = await api.post(`/subscription/admin/users/${userId}/toggle-role`);
-      alert(`User role changed to ${response.data.user.role}`);
+      toast.showSuccess(`User role changed to ${response.data.user.role}`);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to toggle role');
+      toast.showError(error.response?.data?.message || 'Failed to toggle role');
     }
   };
 
@@ -151,28 +155,40 @@ export default function AdminSubscriptionPanel() {
       await api.put(`/subscription/admin/subscriptions/${subscriptionId}/token`, {
         apiToken: tokenValue
       });
-      alert('API token updated!');
+      toast.showSuccess('API token updated!');
       setEditingToken(null);
       setTokenValue('');
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to update API token');
+      toast.showError(error.response?.data?.message || 'Failed to update API token');
     }
   };
 
   const handleToggleSubscription = async (subscriptionId) => {
     try {
       const response = await api.post(`/subscription/admin/subscriptions/${subscriptionId}/toggle`);
-      alert(response.data.message);
+      toast.showSuccess(response.data.message);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to toggle subscription');
+      toast.showError(error.response?.data?.message || 'Failed to toggle subscription');
+    }
+  };
+
+  const handleUpdateActiveUntil = async (subscriptionId, newDate) => {
+    try {
+      await api.put(`/subscription/admin/subscriptions/${subscriptionId}/active-until`, {
+        activeUntil: newDate
+      });
+      toast.showSuccess('Active until date updated!');
+      fetchData();
+    } catch (error) {
+      toast.showError(error.response?.data?.message || 'Failed to update date');
     }
   };
 
   const handleApproveWithdraw = async () => {
     if (!withdrawReceipt) {
-      alert('Please upload a receipt');
+      toast.showError('Please upload a receipt');
       return;
     }
 
@@ -186,13 +202,13 @@ export default function AdminSubscriptionPanel() {
       await api.post(`/subscription/admin/withdraw/${showApproveWithdraw.id}/approve`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      alert('Withdraw approved and receipt uploaded!');
+      toast.showSuccess('Withdraw approved and receipt uploaded!');
       setShowApproveWithdraw(null);
       setWithdrawNote('');
       setWithdrawReceipt(null);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to approve withdraw');
+      toast.showError(error.response?.data?.message || 'Failed to approve withdraw');
     }
   };
 
@@ -202,10 +218,10 @@ export default function AdminSubscriptionPanel() {
 
     try {
       await api.post(`/subscription/admin/withdraw/${withdrawId}/reject`, { reason });
-      alert('Withdraw request rejected');
+      toast.showSuccess('Withdraw request rejected');
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Failed to reject withdraw');
+      toast.showError(error.response?.data?.message || 'Failed to reject withdraw');
     }
   };
 
@@ -618,8 +634,52 @@ export default function AdminSubscriptionPanel() {
                         </div>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-sm text-stone-300">
-                      {sub.activeUntil ? new Date(sub.activeUntil).toLocaleDateString() : '-'}
+                    <td className="py-3 px-4">
+                      {editingActiveUntil === sub.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={activeUntilValue}
+                            onChange={(e) => setActiveUntilValue(e.target.value)}
+                            className="px-2 py-1 text-xs bg-stone-900 border border-stone-700 rounded text-stone-300 focus:outline-none focus:border-emerald-600"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => {
+                              handleUpdateActiveUntil(sub.id, activeUntilValue);
+                              setEditingActiveUntil(null);
+                              setActiveUntilValue('');
+                            }}
+                            className="text-emerald-400 hover:text-emerald-300"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingActiveUntil(null);
+                              setActiveUntilValue('');
+                            }}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-stone-300">
+                            {sub.activeUntil ? new Date(sub.activeUntil).toLocaleDateString() : '-'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingActiveUntil(sub.id);
+                              setActiveUntilValue(sub.activeUntil ? new Date(sub.activeUntil).toISOString().split('T')[0] : '');
+                            }}
+                            className="text-stone-500 hover:text-stone-300 text-xs"
+                          >
+                            ✎
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       {sub.activeUntil ? (
