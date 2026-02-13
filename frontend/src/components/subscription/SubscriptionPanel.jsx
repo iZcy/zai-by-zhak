@@ -159,17 +159,15 @@ export default function SubscriptionPanel() {
 
         <div className="p-5 rounded-xl border border-stone-800 bg-black">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-stone-500">
-              {dashboard?.netCost < 0 ? 'Net Profit' : 'Net Cost'}
-            </span>
-            <iconify-icon icon="solar:calculator-linear" width="20" className={dashboard?.netCost < 0 ? "text-emerald-500" : "text-stone-700"}></iconify-icon>
+            <span className="text-xs font-medium text-stone-500">Monthly Cost</span>
+            <iconify-icon icon="solar:calculator-linear" width="20" className="text-stone-700"></iconify-icon>
           </div>
           <div className="mt-3">
-            <span className={`text-2xl font-semibold ${dashboard?.netCost < 0 ? 'text-emerald-400' : 'text-stone-200'}`}>
-              ${Math.abs(dashboard?.netCost || 0).toFixed(2)}
+            <span className="text-2xl font-semibold text-stone-200">
+              ${((dashboard?.activeStocksCount || 0) * 10).toFixed(2)}
             </span>
             <p className="text-xs text-stone-600 mt-1">
-              {dashboard?.netCost < 0 ? 'Monthly earnings' : 'Monthly cost'}
+              {(dashboard?.activeStocksCount || 0) > 0 ? `${dashboard.activeStocksCount} stock(s) × $10` : 'No active stocks'}
             </p>
           </div>
         </div>
@@ -185,18 +183,6 @@ export default function SubscriptionPanel() {
           </div>
         </div>
       </div>
-
-      {/* Disclaimer */}
-      {dashboard?.netCost < 0 && (
-        <div className="p-4 rounded-xl border border-yellow-900/50 bg-yellow-950/20">
-          <div className="flex items-start gap-3">
-            <iconify-icon icon="solar:info-circle-linear" width="18" className="text-yellow-500 mt-0.5"></iconify-icon>
-            <p className="text-xs text-yellow-200/80">
-              <span className="font-medium text-yellow-200">Note:</span> You must maintain an active stock subscription to claim referral profits. If all your stocks expire or are cancelled, referral earnings will not be payable.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* My Stocks */}
       <div className="p-6 rounded-xl border border-stone-800 bg-black">
